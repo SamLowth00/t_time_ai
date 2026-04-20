@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+.venv/
+venv/
+.env
+
+# Poetry
+poetry.lock
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Vite / Frontend build
+frontend/dist/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Testing / Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Playwright
+playwright-report/
+test-results/

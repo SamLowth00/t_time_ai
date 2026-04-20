@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "t-time-ai-backend"
+version = "0.1.0"
+description = "Tee-time scraper backend"
+authors = ["samlowth"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.9"
+fastapi = "^0.115.0"
+uvicorn = {extras = ["standard"], version = "^0.32.0"}
+playwright = "^1.47.0"
+pydantic = "^2.9.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
