@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.brsgolf import router as brsgolf_router
 from app.api.chronogolf import router as chronogolf_router
 from app.api.clubv1 import router as clubv1_router
 
@@ -15,3 +16,4 @@ app.add_middleware(
 
 app.include_router(clubv1_router)
 app.include_router(chronogolf_router)
+app.include_router(brsgolf_router)

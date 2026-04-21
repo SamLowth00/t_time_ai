@@ -3,6 +3,7 @@ import { NavLink } from "react-router-dom";
 const vendors = [
   { slug: "clubv1", label: "ClubV1" },
   { slug: "chronogolf", label: "Chronogolf" },
+  { slug: "brsgolf", label: "BRS Golf" },
 ];
 
 export default function VendorTabs() {

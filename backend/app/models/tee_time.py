@@ -28,3 +28,13 @@ class ChronogolfRequest(BaseModel):
 
 class ChronogolfResponse(BaseModel):
     tee_times: list[TeeTime]
+
+
+class BrsgolfRequest(BaseModel):
+    url: HttpUrl
+    date: date
+    players: int = Field(ge=1, le=4)
+
+
+class BrsgolfResponse(BaseModel):
+    tee_times: list[TeeTime]
