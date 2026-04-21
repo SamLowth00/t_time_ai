@@ -13,7 +13,7 @@ class ScrapeError(Exception):
     pass
 
 
-_CLUB_ID_RE = re.compile(r"/club/(\d+)/")
+_CLUB_PATH_RE = re.compile(r"/club/([^/]+)/(widget|teetimes)")
 
 _USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -22,15 +22,28 @@ _USER_AGENT = (
 )
 
 
-def _parse_widget_url(url: str) -> tuple[str, dict[str, str]]:
+def _parse_widget_url(url: str) -> tuple[str, str, dict[str, str]]:
+    """Return (identifier, variant, params).
+
+    `identifier` is either a numeric club id or a slug. `variant` is "widget" or
+    "teetimes". Widget URLs carry params in the fragment (`#?key=val`); teetimes
+    URLs carry them in the query string. For teetimes URLs we ignore the param
+    hints — `coursesIds` uses UUIDs incompatible with the v1 API, so we fall
+    back to auto-discovery regardless.
+    """
     parsed = urlparse(url)
-    m = _CLUB_ID_RE.search(parsed.path)
+    m = _CLUB_PATH_RE.search(parsed.path)
     if not m:
-        raise ScrapeError("Could not find club id in URL path (expected /club/<id>/widget)")
-    club_id = m.group(1)
-    fragment = parsed.fragment.lstrip("?")
-    frag_params = dict(parse_qsl(fragment, keep_blank_values=True))
-    return club_id, frag_params
+        raise ScrapeError(
+            "Could not parse club URL (expected /club/<id-or-slug>/widget or /teetimes)"
+        )
+    identifier, variant = m.group(1), m.group(2)
+    if variant == "widget":
+        fragment = parsed.fragment.lstrip("?")
+        params = dict(parse_qsl(fragment, keep_blank_values=True))
+    else:
+        params = {}
+    return identifier, variant, params
 
 
 async def _fetch_json(request: APIRequestContext, url: str):
@@ -43,15 +56,21 @@ async def _fetch_json(request: APIRequestContext, url: str):
         raise ScrapeError(f"GET {url} returned non-JSON body") from exc
 
 
-async def _default_course(request: APIRequestContext, club_id: str) -> tuple[str, str]:
+async def _lookup_courses(
+    request: APIRequestContext, identifier: str
+) -> tuple[str, str, str]:
+    """Return (club_id, course_id, nb_holes). `identifier` can be numeric id or slug."""
     data = await _fetch_json(
-        request, f"https://www.chronogolf.com/marketplace/clubs/{club_id}/courses"
+        request, f"https://www.chronogolf.com/marketplace/clubs/{identifier}/courses"
     )
     if not isinstance(data, list) or not data:
-        raise ScrapeError(f"No courses found for club {club_id}")
+        raise ScrapeError(f"No courses found for club {identifier}")
     bookable = [c for c in data if c.get("online_booking_enabled")]
     course = bookable[0] if bookable else data[0]
-    return str(course["id"]), str(course.get("holes") or 18)
+    club_id = course.get("club_id")
+    if club_id is None:
+        raise ScrapeError(f"Course response for {identifier} missing club_id")
+    return str(club_id), str(course["id"]), str(course.get("holes") or 18)
 
 
 async def _default_affiliation_id(request: APIRequestContext, club_id: str) -> str:
@@ -81,21 +100,22 @@ async def _default_affiliation_id(request: APIRequestContext, club_id: str) -> s
 
 
 async def _resolve_params(
-    request: APIRequestContext, club_id: str, frag_params: dict[str, str]
-) -> tuple[str, str, str]:
-    course_id = frag_params.get("course_id")
-    nb_holes = frag_params.get("nb_holes")
-    if not course_id or not nb_holes:
-        default_course_id, default_holes = await _default_course(request, club_id)
-        course_id = course_id or default_course_id
-        nb_holes = nb_holes or default_holes
+    request: APIRequestContext, identifier: str, params: dict[str, str]
+) -> tuple[str, str, str, str]:
+    """Return (club_id, course_id, nb_holes, affiliation_id).
 
-    affiliation_raw = frag_params.get("affiliation_type_ids", "")
+    Always calls `/courses` so we can resolve slugs to numeric `club_id`.
+    """
+    club_id, default_course_id, default_holes = await _lookup_courses(request, identifier)
+    course_id = params.get("course_id") or default_course_id
+    nb_holes = params.get("nb_holes") or default_holes
+
+    affiliation_raw = params.get("affiliation_type_ids", "")
     affiliation_ids = [p for p in affiliation_raw.split(",") if p]
     affiliation_id = affiliation_ids[0] if affiliation_ids else await _default_affiliation_id(
         request, club_id
     )
-    return course_id, nb_holes, affiliation_id
+    return club_id, course_id, nb_holes, affiliation_id
 
 
 def _build_api_url(
@@ -115,6 +135,7 @@ def _build_api_url(
 
 def _booking_url(
     original_url: str,
+    variant: str,
     course_id: str,
     nb_holes: str,
     affiliation_id: str,
@@ -122,14 +143,18 @@ def _booking_url(
     players: int,
 ) -> str:
     parsed = urlparse(original_url)
-    frag = {
-        "course_id": course_id,
-        "nb_holes": nb_holes,
-        "date": iso_date,
-        "affiliation_type_ids": ",".join([affiliation_id] * players),
-    }
-    new_fragment = "?" + urlencode(frag)
-    return urlunparse(parsed._replace(fragment=new_fragment))
+    if variant == "widget":
+        frag = {
+            "course_id": course_id,
+            "nb_holes": nb_holes,
+            "date": iso_date,
+            "affiliation_type_ids": ",".join([affiliation_id] * players),
+        }
+        return urlunparse(parsed._replace(fragment="?" + urlencode(frag)))
+    # /teetimes uses native query params — date + groupSize drop the user on
+    # the right page; the v2 UUID `coursesIds` we can't construct from v1 data.
+    query = urlencode({"date": iso_date, "groupSize": str(players)})
+    return urlunparse(parsed._replace(query=query, fragment=""))
 
 
 def _format_price(green_fees: list[dict]) -> Optional[str]:
@@ -154,25 +179,25 @@ def _format_price(green_fees: list[dict]) -> Optional[str]:
 
 
 async def scrape_tee_times(url: str, iso_date: str, players: int) -> list[TeeTime]:
-    club_id, frag_params = _parse_widget_url(url)
+    identifier, variant, url_params = _parse_widget_url(url)
 
     async with async_playwright() as p:
         request = await p.request.new_context(
             extra_http_headers={
                 "User-Agent": _USER_AGENT,
                 "Accept": "application/json",
-                "Referer": f"https://www.chronogolf.com/club/{club_id}/widget",
+                "Referer": f"https://www.chronogolf.com/club/{identifier}/{variant}",
             }
         )
         try:
-            course_id, nb_holes, affiliation_id = await _resolve_params(
-                request, club_id, frag_params
+            club_id, course_id, nb_holes, affiliation_id = await _resolve_params(
+                request, identifier, url_params
             )
             api_url = _build_api_url(
                 club_id, course_id, nb_holes, affiliation_id, iso_date, players
             )
             booking_link = _booking_url(
-                url, course_id, nb_holes, affiliation_id, iso_date, players
+                url, variant, course_id, nb_holes, affiliation_id, iso_date, players
             )
 
             resp = await request.get(api_url, timeout=30000)
