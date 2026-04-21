@@ -1,8 +1,6 @@
-export type TeeTime = {
-  time: string;
-  price: string | null;
-  booking_url: string | null;
-};
+import type { TeeTime } from "./clubv1";
+
+export type { TeeTime } from "./clubv1";
 
 type Response = { tee_times: TeeTime[] };
 
@@ -13,7 +11,7 @@ export async function fetchTeeTimes(
   date: string,
   players: number,
 ): Promise<TeeTime[]> {
-  const res = await fetch(`${API_URL}/clubv1`, {
+  const res = await fetch(`${API_URL}/chronogolf`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url, date, players }),

@@ -1,3 +1,4 @@
+"""Scrape tee times from ClubV1. using Playwright"""
 from typing import Optional
 from urllib.parse import urlencode, urljoin, urlparse, urlunparse, parse_qsl
 
@@ -17,7 +18,7 @@ def _with_date(url: str, iso_date: str) -> str:
     return urlunparse(parsed._replace(query=urlencode(query)))
 
 
-async def scrape_tee_times(url: str, iso_date: str) -> list[TeeTime]:
+async def scrape_tee_times(url: str, iso_date: str, players: int) -> list[TeeTime]:
     target_url = _with_date(url, iso_date)
     parsed = urlparse(target_url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
@@ -70,13 +71,12 @@ async def scrape_tee_times(url: str, iso_date: str) -> list[TeeTime]:
                         else ""
                     )
 
-                prices: dict[str, str] = {}
-                for n in range(1, 5):
-                    value_loc = tee.locator(f".price.ball-{n} .value")
-                    if await value_loc.count() > 0:
-                        value = (await value_loc.first.inner_text()).strip()
-                        if value:
-                            prices[str(n)] = value
+                price: Optional[str] = None
+                value_loc = tee.locator(f".price.ball-{players} .value")
+                if await value_loc.count() > 0:
+                    value = (await value_loc.first.inner_text()).strip()
+                    if value:
+                        price = value
 
                 booking_href: Optional[str] = None
                 link = tee.locator("a[href*='/Visitors/BookingAdd']")
@@ -86,7 +86,7 @@ async def scrape_tee_times(url: str, iso_date: str) -> list[TeeTime]:
                         booking_href = urljoin(origin, href)
 
                 tee_times.append(
-                    TeeTime(time=time_text, prices=prices, booking_url=booking_href)
+                    TeeTime(time=time_text, price=price, booking_url=booking_href)
                 )
 
             return tee_times

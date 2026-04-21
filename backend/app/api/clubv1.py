@@ -10,7 +10,7 @@ router = APIRouter()
 async def scrape_clubv1(payload: Clubv1Request) -> Clubv1Response:
     try:
         tee_times = await scrape_tee_times(
-            str(payload.url), payload.date.isoformat()
+            str(payload.url), payload.date.isoformat(), payload.players
         )
     except ScrapeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))

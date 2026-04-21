@@ -15,10 +15,7 @@ export default function TeeTimeTable({ teeTimes }: { teeTimes: TeeTime[] }) {
         <thead className="bg-gray-50 text-left text-gray-600">
           <tr>
             <th className="px-4 py-2 font-medium">Time</th>
-            <th className="px-4 py-2 font-medium">1p</th>
-            <th className="px-4 py-2 font-medium">2p</th>
-            <th className="px-4 py-2 font-medium">3p</th>
-            <th className="px-4 py-2 font-medium">4p</th>
+            <th className="px-4 py-2 font-medium">Price</th>
             <th className="px-4 py-2 font-medium"></th>
           </tr>
         </thead>
@@ -26,10 +23,7 @@ export default function TeeTimeTable({ teeTimes }: { teeTimes: TeeTime[] }) {
           {teeTimes.map((tt, i) => (
             <tr key={`${tt.time}-${i}`} className="border-t border-gray-100">
               <td className="px-4 py-2 font-mono">{tt.time}</td>
-              <td className="px-4 py-2">{tt.prices["1"] ?? "—"}</td>
-              <td className="px-4 py-2">{tt.prices["2"] ?? "—"}</td>
-              <td className="px-4 py-2">{tt.prices["3"] ?? "—"}</td>
-              <td className="px-4 py-2">{tt.prices["4"] ?? "—"}</td>
+              <td className="px-4 py-2">{tt.price ?? "—"}</td>
               <td className="px-4 py-2">
                 {tt.booking_url && (
                   <a

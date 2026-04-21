@@ -1,10 +1,12 @@
 import { useState, type FormEvent } from "react";
-import { fetchTeeTimes, type TeeTime } from "../api/clubv1";
+import { fetchTeeTimes, type TeeTime } from "../api/chronogolf";
 import TeeTimeTable from "../components/TeeTimeTable";
+import VendorTabs from "../components/VendorTabs";
 
-export default function TeeSheetPage() {
+export default function ChronogolfPage() {
   const [url, setUrl] = useState("");
   const [date, setDate] = useState("");
+  const [players, setPlayers] = useState(4);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [teeTimes, setTeeTimes] = useState<TeeTime[] | null>(null);
@@ -15,7 +17,7 @@ export default function TeeSheetPage() {
     setError(null);
     setTeeTimes(null);
     try {
-      const results = await fetchTeeTimes(url, date);
+      const results = await fetchTeeTimes(url, date, players);
       setTeeTimes(results);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Request failed");
@@ -32,9 +34,11 @@ export default function TeeSheetPage() {
             Tee Time Finder
           </h1>
           <p className="text-sm text-gray-600">
-            Paste a ClubV1 tee-sheet URL and pick a date.
+            Paste a Chronogolf widget URL, pick a date, and choose a party size.
           </p>
         </header>
+
+        <VendorTabs />
 
         <form
           onSubmit={onSubmit}
@@ -42,28 +46,45 @@ export default function TeeSheetPage() {
         >
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              Tee sheet URL
+              Widget URL
             </label>
             <input
               type="url"
               required
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://example.hub.clubv1.com/Visitors/TeeSheet"
+              placeholder="https://www.chronogolf.com/club/19494/widget?medium=widget&source=club#?course_id=27283&nb_holes=18&date=2026-04-20&affiliation_type_ids=136060,136060,136060,136060"
               className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">
-              Date
-            </label>
-            <input
-              type="date"
-              required
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">
+                Date
+              </label>
+              <input
+                type="date"
+                required
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">
+                Players
+              </label>
+              <select
+                value={players}
+                onChange={(e) => setPlayers(Number(e.target.value))}
+                className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value={1}>1</option>
+                <option value={2}>2</option>
+                <option value={3}>3</option>
+                <option value={4}>4</option>
+              </select>
+            </div>
           </div>
           <button
             type="submit"
