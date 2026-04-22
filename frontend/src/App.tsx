@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import BrsgolfPage from "./pages/BrsgolfPage";
 import Clubv1Page from "./pages/Clubv1Page";
 import ChronogolfPage from "./pages/ChronogolfPage";
+import IntelligentgolfPage from "./pages/IntelligentgolfPage";
 
 export default function App() {
   return (
@@ -11,6 +12,7 @@ export default function App() {
         <Route path="/clubv1" element={<Clubv1Page />} />
         <Route path="/chronogolf" element={<ChronogolfPage />} />
         <Route path="/brsgolf" element={<BrsgolfPage />} />
+        <Route path="/intelligentgolf" element={<IntelligentgolfPage />} />
       </Routes>
     </BrowserRouter>
   );

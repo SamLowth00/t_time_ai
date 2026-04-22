@@ -38,3 +38,13 @@ class BrsgolfRequest(BaseModel):
 
 class BrsgolfResponse(BaseModel):
     tee_times: list[TeeTime]
+
+
+class IntelligentgolfRequest(BaseModel):
+    url: HttpUrl
+    date: date
+    players: int = Field(ge=1, le=4)
+
+
+class IntelligentgolfResponse(BaseModel):
+    tee_times: list[TeeTime]
