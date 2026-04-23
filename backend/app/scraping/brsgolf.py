@@ -20,16 +20,23 @@ _USER_AGENT = (
 )
 
 
+_ALLOWED_HOSTS = {"visitors.brsgolf.com", "www.brsgolf.com", "brsgolf.com"}
+
+
 def _validate_and_normalize_url(url: str) -> str:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise ScrapeError("BRS Golf URL must be http(s)")
-    if parsed.netloc != "visitors.brsgolf.com":
-        raise ScrapeError("BRS Golf URL host must be visitors.brsgolf.com")
-    slug = parsed.path.strip("/")
-    if not slug or "/" in slug:
-        raise ScrapeError("BRS Golf URL must be of form https://visitors.brsgolf.com/<club>")
-    return f"{parsed.scheme}://{parsed.netloc}/{slug}"
+    host = parsed.netloc.lower()
+    if host not in _ALLOWED_HOSTS:
+        raise ScrapeError(
+            "BRS Golf URL host must be visitors.brsgolf.com or (www.)brsgolf.com"
+        )
+    segments = [s for s in parsed.path.split("/") if s]
+    if not segments:
+        raise ScrapeError("BRS Golf URL must include a club slug, e.g. /<club>")
+    slug = segments[0]
+    return f"https://visitors.brsgolf.com/{slug}"
 
 
 async def _fetch_json(request: APIRequestContext, url: str, *, headers: dict[str, str]) -> dict:

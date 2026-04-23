@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -48,3 +48,13 @@ class IntelligentgolfRequest(BaseModel):
 
 class IntelligentgolfResponse(BaseModel):
     tee_times: list[TeeTime]
+
+
+class WebcrawlerRequest(BaseModel):
+    url: HttpUrl
+
+
+class WebcrawlerResponse(BaseModel):
+    booking_url: Optional[str] = None
+    vendor: Optional[Literal["clubv1", "chronogolf", "brsgolf", "intelligentgolf"]] = None
+    pages_crawled: int

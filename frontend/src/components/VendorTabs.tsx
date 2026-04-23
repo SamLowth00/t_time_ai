@@ -5,6 +5,7 @@ const vendors = [
   { slug: "chronogolf", label: "Chronogolf" },
   { slug: "brsgolf", label: "BRS Golf" },
   { slug: "intelligentgolf", label: "IntelligentGolf" },
+  { slug: "webcrawler", label: "WebCrawler test" },
 ];
 
 export default function VendorTabs() {
