@@ -1,10 +1,14 @@
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+load_dotenv()
 
 from app.api.brsgolf import router as brsgolf_router
 from app.api.chronogolf import router as chronogolf_router
 from app.api.clubv1 import router as clubv1_router
 from app.api.intelligentgolf import router as intelligentgolf_router
+from app.api.nearby_clubs import router as nearby_clubs_router
 from app.api.webcrawler import router as webcrawler_router
 
 app = FastAPI(title="t-time-ai")
@@ -23,3 +27,4 @@ app.include_router(chronogolf_router)
 app.include_router(brsgolf_router)
 app.include_router(intelligentgolf_router)
 app.include_router(webcrawler_router)
+app.include_router(nearby_clubs_router)

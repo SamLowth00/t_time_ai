@@ -3,6 +3,7 @@ import BrsgolfPage from "./pages/BrsgolfPage";
 import Clubv1Page from "./pages/Clubv1Page";
 import ChronogolfPage from "./pages/ChronogolfPage";
 import IntelligentgolfPage from "./pages/IntelligentgolfPage";
+import NearbyClubsPage from "./pages/NearbyClubsPage";
 import WebcrawlerPage from "./pages/WebcrawlerPage";
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="/brsgolf" element={<BrsgolfPage />} />
         <Route path="/intelligentgolf" element={<IntelligentgolfPage />} />
         <Route path="/webcrawler" element={<WebcrawlerPage />} />
+        <Route path="/nearby-clubs" element={<NearbyClubsPage />} />
       </Routes>
     </BrowserRouter>
   );

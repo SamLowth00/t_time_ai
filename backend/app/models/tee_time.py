@@ -58,3 +58,28 @@ class WebcrawlerResponse(BaseModel):
     booking_url: Optional[str] = None
     vendor: Optional[Literal["clubv1", "chronogolf", "brsgolf", "intelligentgolf"]] = None
     pages_crawled: int
+
+
+class LocationSuggestion(BaseModel):
+    place_id: str
+    label: str
+
+
+class GolfClub(BaseModel):
+    place_id: str
+    name: str
+    address: Optional[str] = None
+    website: Optional[str] = None
+
+
+class LocationSearchResponse(BaseModel):
+    suggestions: list[LocationSuggestion]
+
+
+class NearbyClubsRequest(BaseModel):
+    place_id: str
+    radius_km: float = Field(gt=0, le=50)
+
+
+class NearbyClubsResponse(BaseModel):
+    clubs: list[GolfClub]
