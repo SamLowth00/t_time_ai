@@ -45,9 +45,12 @@ async def search_locations(query: str) -> list[LocationSuggestion]:
     return out
 
 
-async def find_nearby_golf_clubs(place_id: str, radius_km: float) -> list[GolfClub]:
+async def find_nearby_golf_clubs(
+    place_id: str, radius_km: float, max_results: int = 10
+) -> list[GolfClub]:
     api_key = _api_key()
     radius_m = radius_km * 1000
+    max_results = max(1, min(max_results, 20))
 
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         details = await client.get(
@@ -74,7 +77,7 @@ async def find_nearby_golf_clubs(place_id: str, radius_km: float) -> list[GolfCl
             },
             json={
                 "includedTypes": ["golf_course"],
-                "maxResultCount": 10,
+                "maxResultCount": max_results,
                 "rankPreference": "DISTANCE",
                 "locationRestriction": {
                     "circle": {

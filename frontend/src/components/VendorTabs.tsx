@@ -1,6 +1,7 @@
 import { NavLink } from "react-router-dom";
 
 const vendors = [
+  { slug: "discover", label: "Discover" },
   { slug: "clubv1", label: "ClubV1" },
   { slug: "chronogolf", label: "Chronogolf" },
   { slug: "brsgolf", label: "BRS Golf" },

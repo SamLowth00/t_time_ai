@@ -1,54 +1,17 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import { useState, type FormEvent } from "react";
 import {
   findNearbyClubs,
-  searchLocations,
   type GolfClub,
-  type LocationSuggestion,
 } from "../api/nearbyClubs";
+import LocationPicker from "../components/LocationPicker";
 import VendorTabs from "../components/VendorTabs";
 
 export default function NearbyClubsPage() {
-  const [query, setQuery] = useState("");
-  const [suggestions, setSuggestions] = useState<LocationSuggestion[]>([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
   const [radiusKm, setRadiusKm] = useState(20);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clubs, setClubs] = useState<GolfClub[] | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (selectedPlaceId) return;
-    if (!query.trim()) {
-      setSuggestions([]);
-      return;
-    }
-    debounceRef.current = setTimeout(async () => {
-      try {
-        const res = await searchLocations(query);
-        setSuggestions(res);
-        setShowSuggestions(true);
-      } catch {
-        setSuggestions([]);
-      }
-    }, 300);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [query, selectedPlaceId]);
-
-  function pickSuggestion(s: LocationSuggestion) {
-    setSelectedPlaceId(s.place_id);
-    setQuery(s.label);
-    setShowSuggestions(false);
-  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -85,44 +48,9 @@ export default function NearbyClubsPage() {
           onSubmit={onSubmit}
           className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
         >
-          <div className="relative">
-            <label className="block text-sm font-medium text-gray-700">
-              Location
-            </label>
-            <input
-              type="text"
-              required
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setSelectedPlaceId(null);
-              }}
-              onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
-              onBlur={() =>
-                setTimeout(() => setShowSuggestions(false), 150)
-              }
-              placeholder="Start typing a city or area..."
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-            {showSuggestions && suggestions.length > 0 && (
-              <ul className="absolute left-0 right-0 z-10 mt-1 max-h-60 overflow-auto rounded-md border border-gray-200 bg-white shadow-lg">
-                {suggestions.map((s) => (
-                  <li key={s.place_id}>
-                    <button
-                      type="button"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        pickSuggestion(s);
-                      }}
-                      className="block w-full px-3 py-2 text-left text-sm hover:bg-gray-100"
-                    >
-                      {s.label}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+          <LocationPicker
+            onSelect={(s) => setSelectedPlaceId(s?.place_id ?? null)}
+          />
           <div>
             <label className="block text-sm font-medium text-gray-700">
               Radius (km)

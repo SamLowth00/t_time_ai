@@ -1,0 +1,76 @@
+import type { GolfClub } from "./nearbyClubs";
+import type { TeeTime } from "./clubv1";
+
+const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+
+export type Vendor = "clubv1" | "chronogolf" | "brsgolf" | "intelligentgolf";
+export type UnsuccessfulReason =
+  | "no_website"
+  | "no_booking_url"
+  | "scrape_failed";
+export type JobDoneReason = "target_reached" | "exhausted";
+
+export type DiscoveryEvent =
+  | { type: "clubs_found"; clubs: GolfClub[] }
+  | { type: "club_started"; place_id: string }
+  | {
+      type: "club_booking_found";
+      place_id: string;
+      booking_url: string;
+      vendor: Vendor;
+    }
+  | {
+      type: "club_succeeded";
+      place_id: string;
+      booking_url: string;
+      vendor: Vendor;
+      tee_times: TeeTime[];
+    }
+  | {
+      type: "club_unsuccessful";
+      place_id: string;
+      reason: UnsuccessfulReason;
+      detail: string | null;
+    }
+  | { type: "done"; reason: JobDoneReason; successful: number };
+
+export type DiscoverRequest = {
+  place_id: string;
+  radius_km: number;
+  date: string;
+  players: number;
+};
+
+export async function startJob(req: DiscoverRequest): Promise<{ job_id: string }> {
+  const res = await fetch(`${API_URL}/discover-tee-times`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+export function subscribeToJob(
+  jobId: string,
+  onEvent: (event: DiscoveryEvent) => void,
+): () => void {
+  const source = new EventSource(`${API_URL}/discover-tee-times/${jobId}/events`);
+  source.onmessage = (msg) => {
+    try {
+      const parsed = JSON.parse(msg.data) as DiscoveryEvent;
+      onEvent(parsed);
+      if (parsed.type === "done") source.close();
+    } catch {
+      // ignore malformed frames
+    }
+  };
+  source.onerror = () => {
+    // Browser auto-retries by default. We don't surface errors here;
+    // closing the EventSource on `done` is the canonical end signal.
+  };
+  return () => source.close();
+}

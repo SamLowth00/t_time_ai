@@ -56,6 +56,49 @@ def _strip_www(host: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
+def _toggle_www(netloc: str) -> str:
+    """
+    Swap between `www.example.com` and `example.com` (preserving port if present).
+    """
+    if not netloc:
+        return netloc
+    if "@" in netloc:
+        # Very uncommon for our use, but keep it safe.
+        auth, hostport = netloc.rsplit("@", 1)
+    else:
+        auth, hostport = "", netloc
+
+    if ":" in hostport:
+        host, port = hostport.split(":", 1)
+        port_part = f":{port}"
+    else:
+        host, port_part = hostport, ""
+
+    host_l = host.lower()
+    swapped = host_l[4:] if host_l.startswith("www.") else f"www.{host_l}"
+    rebuilt = f"{swapped}{port_part}"
+    return f"{auth}@{rebuilt}" if auth else rebuilt
+
+
+def _with_toggled_www(url: str) -> str:
+    parsed = urlparse(url)
+    return urlunparse(
+        (
+            parsed.scheme,
+            _toggle_www(parsed.netloc),
+            parsed.path,
+            parsed.params,
+            parsed.query,
+            parsed.fragment,
+        )
+    )
+
+
+def _is_cert_altname_mismatch_error(exc: Exception) -> bool:
+    msg = str(exc)
+    return "does not match certificate's altnames" in msg
+
+
 def _same_origin(candidate: str, start_host: str) -> bool:
     try:
         return _strip_www(urlparse(candidate).netloc) == start_host
@@ -179,5 +222,19 @@ async def discover_booking_url(start_url: str) -> CrawlResult:
     validated = _validate_start_url(start_url)
     try:
         return await asyncio.wait_for(_crawl(validated), timeout=TOTAL_TIMEOUT_S)
+    except ScrapeError as exc:
+        # Some club sites are configured with a cert that only covers the apex domain
+        # (e.g. `thebunka.co.uk`) but not `www.thebunka.co.uk` (or vice versa).
+        # We keep TLS verification on, and do a single targeted retry with the
+        # alternate hostname when we see the specific mismatch error.
+        if _is_cert_altname_mismatch_error(exc):
+            retry_url = _with_toggled_www(validated)
+            if retry_url != validated:
+                try:
+                    return await asyncio.wait_for(_crawl(retry_url), timeout=TOTAL_TIMEOUT_S)
+                except Exception:
+                    # Preserve the original, more actionable error message.
+                    raise exc
+        raise
     except asyncio.TimeoutError:
         return CrawlResult(None, None, MAX_PAGES)

@@ -20,7 +20,12 @@ _USER_AGENT = (
 )
 
 
-_ALLOWED_HOSTS = {"visitors.brsgolf.com", "www.brsgolf.com", "brsgolf.com"}
+_ALLOWED_HOSTS = {
+    "visitors.brsgolf.com",
+    "www.brsgolf.com",
+    "brsgolf.com",
+    "members.brsgolf.com",
+}
 
 
 def _validate_and_normalize_url(url: str) -> str:
@@ -30,7 +35,7 @@ def _validate_and_normalize_url(url: str) -> str:
     host = parsed.netloc.lower()
     if host not in _ALLOWED_HOSTS:
         raise ScrapeError(
-            "BRS Golf URL host must be visitors.brsgolf.com or (www.)brsgolf.com"
+            "BRS Golf URL host must be visitors.brsgolf.com, members.brsgolf.com, or (www.)brsgolf.com"
         )
     segments = [s for s in parsed.path.split("/") if s]
     if not segments:
