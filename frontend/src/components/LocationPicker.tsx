@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  searchLocations,
-  type LocationSuggestion,
-} from "../api/nearbyClubs";
+import { searchLocations } from "../api/nearbyClubs";
+import type { LocationSuggestion } from "../api/types";
 
 type Props = {
   onSelect: (suggestion: LocationSuggestion | null) => void;

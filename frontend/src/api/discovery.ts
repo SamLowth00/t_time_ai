@@ -1,5 +1,4 @@
-import type { GolfClub } from "./nearbyClubs";
-import type { TeeTime } from "./clubv1";
+import type { GolfClub, TeeTime } from "./types";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 

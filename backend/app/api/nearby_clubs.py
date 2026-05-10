@@ -1,15 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
-from app.models.tee_time import (
-    LocationSearchResponse,
-    NearbyClubsRequest,
-    NearbyClubsResponse,
-)
-from app.scraping.nearby_clubs import (
-    ScrapeError,
-    find_nearby_golf_clubs,
-    search_locations,
-)
+from app.models.tee_time import LocationSearchResponse
+from app.scraping.nearby_clubs import ScrapeError, search_locations
 
 router = APIRouter()
 
@@ -21,12 +13,3 @@ async def get_locations(q: str = "") -> LocationSearchResponse:
     except ScrapeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     return LocationSearchResponse(suggestions=suggestions)
-
-
-@router.post("/nearby-clubs", response_model=NearbyClubsResponse)
-async def post_nearby_clubs(payload: NearbyClubsRequest) -> NearbyClubsResponse:
-    try:
-        clubs = await find_nearby_golf_clubs(payload.place_id, payload.radius_km)
-    except ScrapeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
-    return NearbyClubsResponse(clubs=clubs)

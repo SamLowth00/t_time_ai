@@ -7,11 +7,9 @@ import {
   type UnsuccessfulReason,
   type Vendor,
 } from "../api/discovery";
-import type { TeeTime } from "../api/clubv1";
-import type { GolfClub } from "../api/nearbyClubs";
+import type { GolfClub, TeeTime } from "../api/types";
 import LocationPicker from "../components/LocationPicker";
 import TeeTimeTable from "../components/TeeTimeTable";
-import VendorTabs from "../components/VendorTabs";
 
 type ScanStatus = "finding_booking_url" | "fetching_tee_times";
 
@@ -174,8 +172,6 @@ export default function DiscoverPage() {
             provider, and fetches tee times concurrently.
           </p>
         </header>
-
-        <VendorTabs />
 
         <form
           onSubmit={onSubmit}

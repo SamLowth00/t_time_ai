@@ -1,4 +1,4 @@
-import type { TeeTime } from "../api/clubv1";
+import type { TeeTime } from "../api/types";
 
 export default function TeeTimeTable({ teeTimes }: { teeTimes: TeeTime[] }) {
   if (teeTimes.length === 0) {
