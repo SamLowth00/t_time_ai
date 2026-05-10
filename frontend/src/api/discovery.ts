@@ -7,6 +7,7 @@ export type Vendor = "clubv1" | "chronogolf" | "brsgolf" | "intelligentgolf";
 export type UnsuccessfulReason =
   | "no_website"
   | "no_booking_url"
+  | "unsupported_vendor"
   | "scrape_failed";
 export type JobDoneReason = "target_reached" | "exhausted";
 

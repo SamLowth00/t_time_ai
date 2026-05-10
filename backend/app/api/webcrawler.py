@@ -16,4 +16,5 @@ async def scrape_webcrawler(payload: WebcrawlerRequest) -> WebcrawlerResponse:
         booking_url=result.booking_url,
         vendor=result.vendor,
         pages_crawled=result.pages_crawled,
+        unsupported_booking_url=result.unsupported_booking_url,
     )

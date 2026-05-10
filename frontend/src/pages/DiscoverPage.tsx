@@ -102,6 +102,7 @@ function reduce(state: State, event: DiscoveryEvent): State {
 const REASON_COPY: Record<UnsuccessfulReason, string> = {
   no_website: "No website on Google",
   no_booking_url: "No recognised booking link found",
+  unsupported_vendor: "Uses an unsupported booking vendor",
   scrape_failed: "Scrape failed",
 };
 

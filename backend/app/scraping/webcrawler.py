@@ -49,6 +49,7 @@ class CrawlResult:
     booking_url: Optional[str]
     vendor: Optional[str]
     pages_crawled: int
+    unsupported_booking_url: Optional[str] = None
 
 
 def _strip_www(host: str) -> str:
@@ -99,6 +100,11 @@ def _is_cert_altname_mismatch_error(exc: Exception) -> bool:
     return "does not match certificate's altnames" in msg
 
 
+def _is_dns_error(exc: Exception) -> bool:
+    msg = str(exc)
+    return "ENOTFOUND" in msg or "getaddrinfo" in msg
+
+
 def _same_origin(candidate: str, start_host: str) -> bool:
     try:
         return _strip_www(urlparse(candidate).netloc) == start_host
@@ -143,6 +149,10 @@ async def _crawl(start_url: str) -> CrawlResult:
     priority_q: deque[tuple[str, int]] = deque()
     normal_q: deque[tuple[str, int]] = deque()
     visited: set[str] = set()
+    # First cross-origin booking-looking URL we see — surfaced as a fallback so
+    # callers can distinguish "site uses a vendor we don't support" from "site
+    # has no booking link at all".
+    unsupported_booking_url: Optional[str] = None
 
     priority_q.append((start_url, 0))
 
@@ -162,9 +172,21 @@ async def _crawl(start_url: str) -> CrawlResult:
                 try:
                     resp = await request.get(url, timeout=PER_REQUEST_TIMEOUT_MS)
                 except Exception as exc:
-                    if is_start:
+                    # One retry on transient DNS failures for the start URL —
+                    # Playwright's Node resolver occasionally gets ENOTFOUND
+                    # even when the domain resolves fine.
+                    if is_start and _is_dns_error(exc):
+                        await asyncio.sleep(0.5)
+                        try:
+                            resp = await request.get(url, timeout=PER_REQUEST_TIMEOUT_MS)
+                        except Exception as retry_exc:
+                            raise ScrapeError(
+                                f"Failed to fetch {url}: {retry_exc}"
+                            ) from retry_exc
+                    elif is_start:
                         raise ScrapeError(f"Failed to fetch {url}: {exc}") from exc
-                    continue
+                    else:
+                        continue
                 finally:
                     is_start = False
 
@@ -197,6 +219,13 @@ async def _crawl(start_url: str) -> CrawlResult:
                     if vendor:
                         return CrawlResult(absolute, vendor, len(visited))
 
+                    if (
+                        unsupported_booking_url is None
+                        and not _same_origin(absolute, start_host)
+                        and _is_booking_path(absolute)
+                    ):
+                        unsupported_booking_url = absolute
+
                     extracted.append(absolute)
 
                 if depth >= MAX_DEPTH:
@@ -213,7 +242,7 @@ async def _crawl(start_url: str) -> CrawlResult:
                     else:
                         normal_q.append(entry)
 
-            return CrawlResult(None, None, len(visited))
+            return CrawlResult(None, None, len(visited), unsupported_booking_url)
         finally:
             await request.dispose()
 
@@ -237,4 +266,4 @@ async def discover_booking_url(start_url: str) -> CrawlResult:
                     raise exc
         raise
     except asyncio.TimeoutError:
-        return CrawlResult(None, None, MAX_PAGES)
+        return CrawlResult(None, None, MAX_PAGES, None)

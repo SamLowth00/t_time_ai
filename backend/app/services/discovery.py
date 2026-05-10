@@ -125,9 +125,18 @@ async def _process_club(
         return False
 
     if not crawl.booking_url or not crawl.vendor:
-        queue.put_nowait(
-            ClubUnsuccessfulEvent(place_id=club.place_id, reason="no_booking_url")
-        )
+        if crawl.unsupported_booking_url:
+            queue.put_nowait(
+                ClubUnsuccessfulEvent(
+                    place_id=club.place_id,
+                    reason="unsupported_vendor",
+                    detail=crawl.unsupported_booking_url,
+                )
+            )
+        else:
+            queue.put_nowait(
+                ClubUnsuccessfulEvent(place_id=club.place_id, reason="no_booking_url")
+            )
         return False
 
     queue.put_nowait(

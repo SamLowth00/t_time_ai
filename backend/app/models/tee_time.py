@@ -58,6 +58,7 @@ class WebcrawlerResponse(BaseModel):
     booking_url: Optional[str] = None
     vendor: Optional[Literal["clubv1", "chronogolf", "brsgolf", "intelligentgolf"]] = None
     pages_crawled: int
+    unsupported_booking_url: Optional[str] = None
 
 
 class LocationSuggestion(BaseModel):
@@ -86,7 +87,9 @@ class NearbyClubsResponse(BaseModel):
 
 
 Vendor = Literal["clubv1", "chronogolf", "brsgolf", "intelligentgolf"]
-UnsuccessfulReason = Literal["no_website", "no_booking_url", "scrape_failed"]
+UnsuccessfulReason = Literal[
+    "no_website", "no_booking_url", "unsupported_vendor", "scrape_failed"
+]
 
 
 class DiscoverRequest(BaseModel):

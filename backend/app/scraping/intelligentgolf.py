@@ -25,24 +25,24 @@ _USER_AGENT = (
 )
 
 
+# Match `/visitorbooking` followed by `.php`, `/`, or end-of-path. Older
+# IntelligentGolf sites (e.g. Hallowes) link to `/visitorbooking.php`, which
+# 301-redirects to `/visitorbooking/` — and POST bodies don't survive a 301,
+# so we canonicalize before posting.
+_VISITORBOOKING_PATH_RE = re.compile(r"/visitorbooking(?:\.php|/|$)", re.IGNORECASE)
+
+
 def _normalize_visitorbooking_url(url: str) -> str:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise ScrapeError("URL must be http(s)")
 
-    # Accept any host, but require the visitorbooking path.
-    if "/visitorbooking" not in parsed.path.lower():
-        raise ScrapeError("URL must contain /visitorbooking")
+    match = _VISITORBOOKING_PATH_RE.search(parsed.path)
+    if not match:
+        raise ScrapeError("URL path must include /visitorbooking")
 
-    # Strip query/fragment; normalize to .../visitorbooking/
-    parts = parsed.path.split("/")
-    try:
-        idx = [p.lower() for p in parts].index("visitorbooking")
-    except ValueError as exc:
-        raise ScrapeError("URL path must include /visitorbooking") from exc
-
-    normalized_path = "/" + "/".join([p for p in parts[: idx + 1] if p]) + "/"
-    return urlunparse(parsed._replace(path=normalized_path, query="", fragment=""))
+    canonical_path = parsed.path[: match.start()] + "/visitorbooking/"
+    return urlunparse(parsed._replace(path=canonical_path, query="", fragment=""))
 
 
 def _origin(url: str) -> str:
