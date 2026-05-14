@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import uuid
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 from pydantic import BaseModel
 
@@ -28,6 +28,28 @@ MAX_CANDIDATES = 20  # Google Places searchNearby cap
 TARGET_SUCCESSES = 10
 WEBCRAWLER_TIMEOUT_S = 35
 SCRAPER_TIMEOUT_S = 60
+
+# Server-wide cap on concurrent discovery jobs. Each job runs CONCURRENCY workers,
+# each able to drive a Playwright context, so peak browser count is
+# MAX_CONCURRENT_JOBS * CONCURRENCY (5 * 8 = 40). This is the backstop for when
+# per-IP rate limits are bypassed by many distinct IPs. Job N+1 waits at the
+# `async with` in _run_job until an in-flight job finishes.
+MAX_CONCURRENT_JOBS = 5
+
+# Built lazily, not at import time. On Python 3.9 an asyncio.Semaphore binds to the
+# event loop that exists when it's constructed — at import time that is not uvicorn's
+# serving loop, so a job that actually had to wait would raise "got Future attached
+# to a different loop". Constructing it on first use (inside _run_job, on the serving
+# loop) binds it correctly. The check-and-assign has no `await`, so concurrent
+# callers cannot interleave and race it.
+_discovery_semaphore: Optional[asyncio.Semaphore] = None
+
+
+def _get_discovery_semaphore() -> asyncio.Semaphore:
+    global _discovery_semaphore
+    if _discovery_semaphore is None:
+        _discovery_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+    return _discovery_semaphore
 
 
 def start_job(place_id: str, radius_km: float, iso_date: str, players: int) -> str:
@@ -60,40 +82,47 @@ async def _run_job(
 ) -> None:
     queue = JOBS[job_id]
     success_count = 0
-    try:
-        clubs = await find_nearby_golf_clubs(
-            place_id, radius_km, max_results=MAX_CANDIDATES
-        )
-        queue.put_nowait(ClubsFoundEvent(clubs=clubs))
+    # Wait here for a concurrency slot. The POST already returned a job_id and the
+    # client may already be subscribed; its SSE stream stays silent until we're in.
+    async with _get_discovery_semaphore():
+        try:
+            clubs = await find_nearby_golf_clubs(
+                place_id, radius_km, max_results=MAX_CANDIDATES
+            )
+            queue.put_nowait(ClubsFoundEvent(clubs=clubs))
 
-        # Workers pull from this in distance order; earliest = nearest.
-        club_queue: asyncio.Queue = asyncio.Queue()
-        for c in clubs:
-            club_queue.put_nowait(c)
+            # Workers pull from this in distance order; earliest = nearest.
+            club_queue: asyncio.Queue = asyncio.Queue()
+            for c in clubs:
+                club_queue.put_nowait(c)
 
-        stop_event = asyncio.Event()
+            stop_event = asyncio.Event()
 
-        async def worker() -> None:
-            nonlocal success_count
-            while not stop_event.is_set():
-                try:
-                    club = club_queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    return
-                succeeded = await _process_club(club, iso_date, players, queue)
-                if succeeded:
-                    success_count += 1
-                    if success_count >= TARGET_SUCCESSES:
-                        stop_event.set()
+            async def worker() -> None:
+                nonlocal success_count
+                while not stop_event.is_set():
+                    try:
+                        club = club_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        return
+                    succeeded = await _process_club(club, iso_date, players, queue)
+                    if succeeded:
+                        success_count += 1
+                        if success_count >= TARGET_SUCCESSES:
+                            stop_event.set()
 
-        await asyncio.gather(*[worker() for _ in range(CONCURRENCY)])
+            await asyncio.gather(*[worker() for _ in range(CONCURRENCY)])
 
-        reason = "target_reached" if success_count >= TARGET_SUCCESSES else "exhausted"
-    except Exception:
-        logger.exception("discovery job %s failed", job_id)
-        reason = "exhausted"
-    finally:
-        queue.put_nowait(JobDoneEvent(reason=reason, successful=success_count))
+            reason = (
+                "target_reached"
+                if success_count >= TARGET_SUCCESSES
+                else "exhausted"
+            )
+        except Exception:
+            logger.exception("discovery job %s failed", job_id)
+            reason = "exhausted"
+        finally:
+            queue.put_nowait(JobDoneEvent(reason=reason, successful=success_count))
 
 
 async def _process_club(
