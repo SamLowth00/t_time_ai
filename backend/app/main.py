@@ -1,13 +1,20 @@
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 load_dotenv()
 
 from app.api.discovery import router as discovery_router
 from app.api.nearby_clubs import router as nearby_clubs_router
+from app.rate_limit import limiter, rate_limit_handler
 
 app = FastAPI(title="t-time-ai")
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

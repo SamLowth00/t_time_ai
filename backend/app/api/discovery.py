@@ -1,14 +1,18 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Response
 from sse_starlette.sse import EventSourceResponse
 
 from app.models.tee_time import DiscoverRequest, JobStartResponse
+from app.rate_limit import limiter
 from app.services.discovery import JOBS, start_job, subscribe
 
 router = APIRouter()
 
 
 @router.post("/discover-tee-times", response_model=JobStartResponse)
-async def post_discover(payload: DiscoverRequest) -> JobStartResponse:
+@limiter.limit("5/hour;20/day")
+async def post_discover(
+    request: Request, response: Response, payload: DiscoverRequest
+) -> JobStartResponse:
     job_id = start_job(
         place_id=payload.place_id,
         radius_km=payload.radius_km,
