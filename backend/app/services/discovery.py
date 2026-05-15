@@ -16,7 +16,7 @@ from app.models.tee_time import (
 )
 from app.scraping import VENDOR_SCRAPERS
 from app.scraping.nearby_clubs import find_nearby_golf_clubs
-from app.scraping.webcrawler import discover_booking_url
+from app.scraping.webcrawler import RobotsDisallowedError, discover_booking_url
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +143,13 @@ async def _process_club(
         crawl = await asyncio.wait_for(
             discover_booking_url(club.website), timeout=WEBCRAWLER_TIMEOUT_S
         )
+    except RobotsDisallowedError:
+        queue.put_nowait(
+            ClubUnsuccessfulEvent(
+                place_id=club.place_id, reason="robots_disallowed"
+            )
+        )
+        return False
     except Exception as exc:
         queue.put_nowait(
             ClubUnsuccessfulEvent(

@@ -5,11 +5,18 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.robotparser import RobotFileParser
 
 from playwright.async_api import async_playwright
 
 
 class ScrapeError(Exception):
+    pass
+
+
+class RobotsDisallowedError(Exception):
+    """The crawl start URL is blocked by the site's robots.txt rules."""
+
     pass
 
 
@@ -42,6 +49,49 @@ _PRIORITY_PATH_RE = re.compile(
     re.IGNORECASE,
 )
 _SKIP_SCHEMES = ("mailto:", "tel:", "javascript:", "data:", "#")
+
+# Parsed when robots.txt is missing or unreadable — explicit allow-all so a failed
+# robots fetch does not block legitimate crawls (same behaviour as an empty file).
+_PERMISSIVE_ROBOTS_LINES = ("User-agent: *", "Disallow:")
+
+
+def _origin_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+async def _robots_parser_for_origin(
+    request,
+    origin: str,
+    cache: dict[str, RobotFileParser],
+) -> RobotFileParser:
+    cached = cache.get(origin)
+    if cached is not None:
+        return cached
+    robots_url = urljoin(origin + "/", "/robots.txt")
+    rp = RobotFileParser()
+    rp.set_url(robots_url)
+    try:
+        resp = await request.get(robots_url, timeout=PER_REQUEST_TIMEOUT_MS)
+        if resp.status == 200:
+            body = await resp.text()
+            rp.parse(body.splitlines())
+        else:
+            rp.parse(list(_PERMISSIVE_ROBOTS_LINES))
+    except Exception:
+        rp.parse(list(_PERMISSIVE_ROBOTS_LINES))
+    cache[origin] = rp
+    return rp
+
+
+async def _robots_allows_fetch(
+    request,
+    target_url: str,
+    cache: dict[str, RobotFileParser],
+) -> bool:
+    origin = _origin_from_url(target_url)
+    rp = await _robots_parser_for_origin(request, origin, cache)
+    return rp.can_fetch(_USER_AGENT, target_url)
 
 
 @dataclass
@@ -145,6 +195,7 @@ def _validate_start_url(url: str) -> str:
 
 async def _crawl(start_url: str) -> CrawlResult:
     start_host = _strip_www(urlparse(start_url).netloc)
+    robots_by_origin: dict[str, RobotFileParser] = {}
 
     priority_q: deque[tuple[str, int]] = deque()
     normal_q: deque[tuple[str, int]] = deque()
@@ -168,6 +219,11 @@ async def _crawl(start_url: str) -> CrawlResult:
                 if key in visited:
                     continue
                 visited.add(key)
+
+                if not await _robots_allows_fetch(request, url, robots_by_origin):
+                    if url == start_url:
+                        raise RobotsDisallowedError(start_url)
+                    continue
 
                 try:
                     resp = await request.get(url, timeout=PER_REQUEST_TIMEOUT_MS)

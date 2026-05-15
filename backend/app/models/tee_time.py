@@ -28,7 +28,11 @@ class LocationSearchResponse(BaseModel):
 
 Vendor = Literal["clubv1", "chronogolf", "brsgolf", "intelligentgolf"]
 UnsuccessfulReason = Literal[
-    "no_website", "no_booking_url", "unsupported_vendor", "scrape_failed"
+    "no_website",
+    "no_booking_url",
+    "unsupported_vendor",
+    "scrape_failed",
+    "robots_disallowed",
 ]
 
 

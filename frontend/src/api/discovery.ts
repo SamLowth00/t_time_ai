@@ -7,7 +7,8 @@ export type UnsuccessfulReason =
   | "no_website"
   | "no_booking_url"
   | "unsupported_vendor"
-  | "scrape_failed";
+  | "scrape_failed"
+  | "robots_disallowed";
 export type JobDoneReason = "target_reached" | "exhausted";
 
 export type DiscoveryEvent =

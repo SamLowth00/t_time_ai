@@ -102,6 +102,7 @@ const REASON_COPY: Record<UnsuccessfulReason, string> = {
   no_booking_url: "No recognised booking link found",
   unsupported_vendor: "Uses an unsupported booking vendor",
   scrape_failed: "Scrape failed",
+  robots_disallowed: "Crawling not allowed by robots.txt",
 };
 
 const STATUS_COPY: Record<ScanStatus, string> = {

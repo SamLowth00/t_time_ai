@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Backend learning notes — concurrency, async & rate limiting</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif; }
+  pre { background: #0f172a; color: #e2e8f0; padding: 1rem 1.25rem; border-radius: 0.5rem; overflow-x: auto; font-size: 0.83rem; line-height: 1.55; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  :not(pre) > code { background: #f1f5f9; color: #0f172a; padding: 0.1em 0.35em; border-radius: 0.25rem; font-size: 0.88em; }
+  .anchor { scroll-margin-top: 1.5rem; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #e2e8f0; padding: 0.5rem 0.75rem; text-align: left; vertical-align: top; font-size: 0.9rem; }
+  th { background: #f8fafc; font-weight: 600; }
+  tbody tr:nth-child(even) { background: #fbfdff; }
+  h2 { scroll-margin-top: 1rem; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+
+<header class="bg-white border-b border-slate-200">
+  <div class="mx-auto max-w-4xl px-6 py-8">
+    <p class="text-xs uppercase tracking-wider text-slate-500 font-semibold">Personal reference · t-time-ai</p>
+    <h1 class="mt-1 text-3xl font-bold">Backend learning notes</h1>
+    <p class="mt-3 text-slate-600 max-w-2xl">Concepts worked through while productionising the backend — rate limiting, then a long dive into concurrency: async, the event loop, semaphores, threads, the GIL, processes, and how it all maps back to JavaScript.</p>
+    <div class="mt-5 grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
+      <a href="#cheatsheet" class="block bg-indigo-50 hover:bg-indigo-100 text-indigo-900 rounded px-3 py-2 font-medium">0 · Cheat sheet</a>
+      <a href="#bound" class="block bg-slate-100 hover:bg-slate-200 rounded px-3 py-2">1 · CPU vs I/O bound</a>
+      <a href="#conc-par" class="block bg-slate-100 hover:bg-slate-200 rounded px-3 py-2">2 · Concurrency vs parallelism</a>
+      <a href="#preempt" class="block bg-slate-100 hover:bg-slate-200 rounded px-3 py-2">3 · Preemptive vs cooperative</a>
+      <a href="#asyncio" class="block bg-slate-100 hover:bg-slate-200 rounded px-3 py-2">4 · asyncio &amp; coroutines</a>
+      <a href="#semaphore" class="block bg-slate-100 hover:bg-slate-200 rounded px-3 py-2">5 · Semaphores</a>
+      <a href="#threading" class="block bg-slate-100 hover:bg-slate-200 rounded px-3 py-2">6 · Threading &amp; the GIL</a>
+      <a href="#processes" class="block bg-slate-100 hover:bg-slate-200 rounded px-3 py-2">7 · Processes &amp; Workers</a>
+      <a href="#javascript" class="block bg-slate-100 hover:bg-slate-200 rounded px-3 py-2">8 · JavaScript's model</a>
+      <a href="#ratelimit" class="block bg-slate-100 hover:bg-slate-200 rounded px-3 py-2">9 · Rate limiting &amp; Redis</a>
+      <a href="#glossary" class="block bg-slate-100 hover:bg-slate-200 rounded px-3 py-2">10 · Glossary</a>
+    </div>
+  </div>
+</header>
+
+<main class="mx-auto max-w-4xl px-6 py-10 space-y-14">
+
+<!-- CHEAT SHEET -->
+<section id="cheatsheet" class="anchor">
+  <h2 class="text-2xl font-bold border-b pb-2">0 · The cheat sheet</h2>
+  <p class="mt-3 text-slate-700">If you only re-read one thing — this. Everything else is the "why".</p>
+
+  <div class="mt-4 rounded-md border-l-4 border-indigo-500 bg-indigo-50 px-4 py-3">
+    <p class="font-semibold text-indigo-900">The one question that decides your concurrency tool</p>
+    <p class="text-sm text-indigo-900 mt-1"><strong>Is the CPU working hard, or is it waiting?</strong> Working hard (computing) → processes/Workers. Waiting (network, disk, DB) → asyncio or threads.</p>
+  </div>
+
+  <table class="mt-4">
+    <thead><tr><th>Your work is…</th><th>Library situation</th><th>Use</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>I/O-bound (waiting)</td><td>async-native libs (<code>aiohttp</code>, async Playwright)</td><td><strong>asyncio</strong></td><td>one thread fills idle wait time; cheap; scales to thousands of tasks</td></tr>
+      <tr><td>I/O-bound (waiting)</td><td>only blocking/synchronous libs (<code>requests</code>, legacy SDK)</td><td><strong>threading</strong></td><td>works with any library; OS preempts threads; GIL released during I/O</td></tr>
+      <tr><td>CPU-bound (computing)</td><td>any</td><td><strong>multiprocessing</strong> / Workers</td><td>real parallelism across cores; only way past the GIL</td></tr>
+    </tbody>
+  </table>
+
+  <div class="mt-4 rounded-md border-l-4 border-amber-500 bg-amber-50 px-4 py-3">
+    <p class="font-semibold text-amber-900">Two things that are NOT the deciding factor</p>
+    <p class="text-sm text-amber-900 mt-1"><strong>Code complexity</strong> — a 1,000-line system can be I/O-bound; a one-liner can be CPU-bound. And <strong>"is it a background job?"</strong> — that's a separate, orthogonal question (just whether you <code>await</code> it or detach it). Neither tells you which tool to use. Only the bottleneck does.</p>
+  </div>
+</section>
+
+<!-- 1. CPU vs IO BOUND -->
+<section id="bound" class="anchor">
+  <h2 class="text-2xl font-bold border-b pb-2">1 · CPU-bound vs I/O-bound</h2>
+  <p class="mt-3 text-slate-700">The foundational concept — everything else hangs off it. <strong>"Bound" means "bottlenecked by".</strong> When a task runs, it's in one of two states:</p>
+  <ul class="mt-2 list-disc pl-6 text-slate-700 space-y-1">
+    <li><strong>Actively using the CPU</strong> — calculating, transforming data. → <strong>CPU-bound</strong></li>
+    <li><strong>Waiting for something external</strong> — network, disk, database. CPU sits idle. → <strong>I/O-bound</strong></li>
+  </ul>
+
+  <div class="mt-4 rounded-md border-l-4 border-indigo-500 bg-indigo-50 px-4 py-3">
+    <p class="font-semibold text-indigo-900">The litmus test</p>
+    <p class="text-sm text-indigo-900 mt-1">Would a <em>faster CPU</em> make this finish sooner? <strong>Yes</strong> → CPU-bound. <strong>No</strong> (you're waiting on a network/disk that's just as slow) → I/O-bound.</p>
+  </div>
+
+  <div class="mt-4 grid sm:grid-cols-2 gap-4">
+    <div class="bg-white rounded-lg border border-slate-200 p-4">
+      <p class="font-semibold">CPU-bound — a core pinned at 100%</p>
+      <p class="text-sm text-slate-600 mt-1">Heavy math, image resizing, video transcoding, compression, sorting huge lists, ML inference, <strong>rendering a web page</strong>.</p>
+    </div>
+    <div class="bg-white rounded-lg border border-slate-200 p-4">
+      <p class="font-semibold">I/O-bound — CPU mostly idle, waiting</p>
+      <p class="text-sm text-slate-600 mt-1">Downloading a file, querying a database, reading from disk, calling an API.</p>
+    </div>
+  </div>
+
+  <div class="mt-4 rounded-md border-l-4 border-purple-500 bg-purple-50 px-4 py-3">
+    <p class="font-semibold text-purple-900">Analogy — the chef</p>
+    <p class="text-sm text-purple-900 mt-1"><strong>CPU-bound</strong> = the chef chopping vegetables. The hands (CPU) are the bottleneck — only faster hands or more chefs help. <strong>I/O-bound</strong> = the chef put a dish in the oven and waits 20 minutes. The hands aren't the bottleneck; the oven time is. A faster chef changes nothing — but the chef <em>can start another dish while waiting</em>. That's concurrency.</p>
+  </div>
+
+  <div class="mt-4 rounded-md border-l-4 border-emerald-500 bg-emerald-50 px-4 py-3">
+    <p class="font-semibold text-emerald-900">In this project</p>
+    <p class="text-sm text-emerald-900 mt-1">The Python backend is <strong>I/O-bound</strong> — it sends a request to Google Places and waits, tells Playwright to load a page and waits. → asyncio. Rendering the pages is <strong>CPU-bound</strong> — that's Chromium parsing HTML, running JS, painting. → it runs in separate Chromium processes. The architecture split itself correctly along the bottleneck line.</p>
+  </div>
+</section>
+
+<!-- 2. CONCURRENCY VS PARALLELISM -->
+<section id="conc-par" class="anchor">
+  <h2 class="text-2xl font-bold border-b pb-2">2 · Concurrency vs parallelism</h2>
+  <p class="mt-3 text-slate-700">They sound like synonyms. They're not.</p>
+  <table class="mt-3">
+    <tbody>
+      <tr><td><strong>Concurrent</strong></td><td>multiple tasks <em>in progress</em> over the same period, interleaved on one thread — taking turns. At any single instant, only one is actually running.</td></tr>
+      <tr><td><strong>Parallel</strong></td><td>multiple tasks executing <em>at the same instant</em>, on different CPU cores. Genuinely simultaneous.</td></tr>
+    </tbody>
+  </table>
+
+  <p class="mt-4 text-slate-700"><code>asyncio.gather(...)</code> is <strong>concurrent, not parallel</strong>. It schedules many coroutines on one event loop, on one thread — they take turns at <code>await</code> points. The discovery code's <code>gather</code> of 8 workers is 8 coroutines on <em>one</em> thread, not 8 cores.</p>
+
+  <div class="mt-4 rounded-md border-l-4 border-purple-500 bg-purple-50 px-4 py-3">
+    <p class="font-semibold text-purple-900">Analogy — one chef, 8 dishes</p>
+    <p class="text-sm text-purple-900 mt-1">The chef does one action at a time, but while dish 1 is in the oven (the <code>await</code> — the waiting), the chef chops for dish 2, stirs dish 3. The <em>waiting</em> overlaps; the chef's <em>active work</em> never does. 8 oven-heavy dishes finish nearly as fast as 1. 8 all-chopping dishes take 8× as long — there's no waiting to overlap.</p>
+  </div>
+
+  <p class="mt-4 text-slate-700">Which is exactly why <code>gather</code> is brilliant for I/O-bound work (the waits overlap) and useless for CPU-bound work (no waiting to fill — for that you need real parallelism).</p>
+</section>
+
+<!-- 3. PREEMPTIVE VS COOPERATIVE -->
+<section id="preempt" class="anchor">
+  <h2 class="text-2xl font-bold border-b pb-2">3 · Preemptive vs cooperative multitasking</h2>
+  <p class="mt-3 text-slate-700">Both share limited CPUs among many tasks. They differ on one question: <strong>when it's time to switch tasks — who decides?</strong></p>
+
+  <table class="mt-4">
+    <thead><tr><th></th><th>Preemptive</th><th>Cooperative</th></tr></thead>
+    <tbody>
+      <tr><td>Who switches</td><td>an external scheduler (the OS), anytime</td><td>the task itself, at points it chooses</td></tr>
+      <tr><td>Trigger</td><td>hardware timer interrupt (~every few ms)</td><td>an explicit <code>await</code> / <code>yield</code></td></tr>
+      <tr><td>Shared state</td><td>can be caught half-updated → <strong>needs locks</strong></td><td>atomic between yields → <strong>rarely needs locks</strong></td></tr>
+      <tr><td>Switch cost</td><td>higher (kernel round-trip)</td><td>lower (in-process)</td></tr>
+      <tr><td>One bad task</td><td>contained — scheduler yanks it</td><td><strong>freezes everything</strong> — nothing can preempt it</td></tr>
+      <tr><td>Examples</td><td>OS threads &amp; processes</td><td>asyncio, JS event loop, generators</td></tr>
+    </tbody>
+  </table>
+
+  <div class="mt-4 rounded-md border-l-4 border-purple-500 bg-purple-50 px-4 py-3">
+    <p class="font-semibold text-purple-900">Analogy</p>
+    <p class="text-sm text-purple-900 mt-1"><strong>Preemptive</strong> = a classroom with a strict teacher and a stopwatch — the teacher cuts off any student mid-sentence. <strong>Cooperative</strong> = a conversation among polite adults passing a talking stick — you speak until a natural pause, then hand it over yourself. Efficient and civil, until one person monologues forever and everyone's stuck.</p>
+  </div>
+
+  <div class="mt-4 rounded-md border-l-4 border-indigo-500 bg-indigo-50 px-4 py-3">
+    <p class="font-semibold text-indigo-900">The history is the interesting part</p>
+    <p class="text-sm text-indigo-900 mt-1">At the <strong>OS level</strong>, the world moved <em>away</em> from cooperative — Windows 3.x and classic Mac OS were cooperative, and one frozen app hung the whole machine. The shift to preemptive was a stability win. But <em>inside a single program</em>, cooperative came <strong>back</strong> (asyncio, Node, Go) — because there you control all the code and can trust it to yield, buying cheap switches and lock-free atomic-between-yields. Preemptive is about <em>distrust</em>; cooperative is about <em>trust + efficiency</em>.</p>
+  </div>
+</section>
+
+<!-- 4. ASYNCIO -->
+<section id="asyncio" class="anchor">
+  <h2 class="text-2xl font-bold border-b pb-2">4 · asyncio &amp; coroutines</h2>
+
+  <h3 class="mt-5 text-lg font-semibold">Calling an <code>async def</code> runs zero lines of it</h3>
+  <p class="mt-2 text-slate-700">This is the thing to internalise. A regular function call runs the body. An <code>async def</code> call does <strong>not</strong> — it builds an inert <em>coroutine object</em> (a "frozen plan") and hands it back. Not even the first line runs.</p>
+  <pre><code>async def say_hello():
+    print("hello!")
+
+say_hello()    # prints NOTHING. Returns &lt;coroutine object&gt;.
+               # (and warns: "coroutine was never awaited")</code></pre>
+  <p class="mt-2 text-slate-700">To actually run it, something must <strong>drive</strong> it:</p>
+  <table class="mt-2">
+    <thead><tr><th>What you write</th><th>Body runs?</th><th>Driven by</th></tr></thead>
+    <tbody>
+      <tr><td><code>_run_job(...)</code></td><td><strong>no</strong></td><td>nobody — coroutine created, then discarded</td></tr>
+      <tr><td><code>await _run_job(...)</code></td><td>yes</td><td>the current coroutine — which <em>blocks</em> until it finishes</td></tr>
+      <tr><td><code>asyncio.create_task(_run_job(...))</code></td><td>yes</td><td>the event loop, concurrently — caller does <em>not</em> wait</td></tr>
+    </tbody>
+  </table>
+
+  <div class="mt-4 rounded-md border-l-4 border-amber-500 bg-amber-50 px-4 py-3">
+    <p class="font-semibold text-amber-900">"There is no background"</p>
+    <p class="text-sm text-amber-900 mt-1">A bare call doesn't "run in the background later" — there is no ambient background. "The background" <em>is</em> the event loop's task list. Code only runs concurrently if it's been <strong>registered with the loop as a Task</strong>. <code>create_task</code> does that registration; a bare call doesn't, so the coroutine is just garbage-collected, unrun.</p>
+  </div>
+
+  <h3 class="mt-6 text-lg font-semibold">The event loop only switches at <code>await</code></h3>
+  <p class="mt-2 text-slate-700">The single rule that fixes the whole mental model:</p>
+  <div class="mt-2 rounded-md border-l-4 border-indigo-500 bg-indigo-50 px-4 py-3">
+    <p class="text-sm text-indigo-900"><strong>No <code>await</code>, no switch.</strong> A synchronous function runs atomically — it cannot be preempted. So <code>start_job</code> (a plain <code>def</code> with no <code>await</code>) runs start-to-finish uninterrupted; <code>_run_job</code> doesn't interleave with it — it waits in the ready queue until <code>start_job</code> is done <em>and</em> the call chain hits an <code>await</code>.</p>
+  </div>
+  <p class="mt-3 text-slate-700">The loop's actual tick: <strong>take a ready task → run it until it suspends or finishes → move any newly-unblocked tasks into "ready" → repeat.</strong> (A suspended task isn't polled — it's <em>moved back</em> into the ready queue when the thing it waited on completes.) And <code>await</code> only hands control back if the awaited thing <em>isn't ready yet</em>; awaiting something already complete just continues straight through.</p>
+
+  <div class="mt-4 rounded-md border-l-4 border-emerald-500 bg-emerald-50 px-4 py-3">
+    <p class="font-semibold text-emerald-900">Payoff &amp; danger</p>
+    <p class="text-sm text-emerald-900 mt-1"><strong>Payoff:</strong> code between <code>await</code>s is atomic, so you rarely need locks — the <code>await</code>-free spans <em>are</em> your critical sections, for free. <strong>Danger:</strong> a blocking call (<code>time.sleep</code>, a sync DB driver, a heavy CPU loop) has no <code>await</code> — it freezes the <em>entire</em> loop, every task, because nothing can preempt it. This is why the scrapers use Playwright's <em>async</em> API.</p>
+  </div>
+
+  <div class="mt-4 rounded-md border-l-4 border-amber-500 bg-amber-50 px-4 py-3">
+    <p class="font-semibold text-amber-900">JavaScript trap (for JS people)</p>
+    <p class="text-sm text-amber-900 mt-1">In JS, calling an <code>async function</code> runs its body <em>synchronously up to the first <code>await</code></em>, then returns a promise. Python is stricter: calling runs <strong>nothing</strong>, and <code>create_task</code> is <em>fully lazy</em> — even the synchronous head of the function doesn't run until the loop next gets control. Same keyword, different "when does it start" rule.</p>
+  </div>
+</section>
+
+<!-- 5. SEMAPHORES -->
+<section id="semaphore" class="anchor">
+  <h2 class="text-2xl font-bold border-b pb-2">5 · Semaphores</h2>
+  <p class="mt-3 text-slate-700">The simplest concurrency primitive: <strong>a counter with two operations.</strong></p>
+  <ul class="mt-2 list-disc pl-6 text-slate-700 space-y-1">
+    <li><strong>acquire</strong> — counter above zero? decrement and proceed. Counter at zero? <em>suspend</em> until a slot frees.</li>
+    <li><strong>release</strong> — increment the counter; wake the next waiter if there is one.</li>
+  </ul>
+  <pre><code>async with SEMAPHORE:     # acquire (waits here if counter is 0)
+    do_the_work()         # at most N coroutines are ever inside this block
+# release on the way out — automatically, even on exception or cancellation</code></pre>
+  <p class="mt-2 text-slate-700">The <code>async with</code> matters: it guarantees the release happens on <em>every</em> exit path. Hand-rolled acquire/release that skips a release on an exception permanently leaks a slot.</p>
+
+  <div class="mt-4 rounded-md border-l-4 border-indigo-500 bg-indigo-50 px-4 py-3">
+    <p class="text-sm text-indigo-900"><code>asyncio.Semaphore(1)</code> <strong>is just a lock.</strong> A semaphore is the generalisation: "a lock, but N holders allowed."</p>
+  </div>
+
+  <h3 class="mt-5 text-lg font-semibold">Where does a waiting job actually live?</h3>
+  <p class="mt-2 text-slate-700">When job #6 hits a full semaphore, <code>acquire()</code> creates a <code>Future</code>, parks it in the semaphore's internal <code>_waiters</code> deque, and <code>await</code>s it. So:</p>
+  <table class="mt-2">
+    <tbody>
+      <tr><td>The <strong>Future</strong> ("your ticket")</td><td>the semaphore's <code>_waiters</code> deque</td></tr>
+      <tr><td>The <strong>Task</strong> + coroutine + all its frozen local variables</td><td>the event loop's task registry, suspended</td></tr>
+    </tbody>
+  </table>
+  <p class="mt-3 text-slate-700">The semaphore doesn't store "the job" — it stores a Future. <code>release()</code> completes that Future, the loop reschedules the Task, and <code>_run_job</code> continues under its own power. (And note: job #6 has <em>already started</em> — it ran its first couple of lines, then froze <em>on</em> the <code>async with</code> line. It's a started function parked mid-body, not a queued one waiting to begin.)</p>
+
+  <div class="mt-4 rounded-md border-l-4 border-purple-500 bg-purple-50 px-4 py-3">
+    <p class="font-semibold text-purple-900">Analogy — the restaurant host</p>
+    <p class="text-sm text-purple-900 mt-1">The semaphore is a host with a clipboard. When the place is full, the host writes a ticket on the waitlist (the <code>Future</code> in <code>_waiters</code>). But <em>you</em> aren't on the clipboard — you're standing by the door (the event loop). When a table frees, the host calls the next ticket (<code>fut.set_result()</code>), and that call is what tells you to walk in.</p>
+  </div>
+
+  <div class="mt-4 rounded-md border-l-4 border-amber-500 bg-amber-50 px-4 py-3">
+    <p class="font-semibold text-amber-900">Gotcha — Python 3.9 loop binding</p>
+    <p class="text-sm text-amber-900 mt-1">On Python 3.9, <code>asyncio.Semaphore()</code> binds to whatever event loop exists <em>when it's constructed</em>. Built at <strong>import time</strong>, that's not uvicorn's serving loop — and the first job that actually has to <em>wait</em> raises <code>got Future attached to a different loop</code>. (Acquiring a free slot is fine — it just decrements an int, no loop involved. Only <em>waiting</em> touches the loop. That asymmetry is the tell.) Fix: build it <strong>lazily</strong>, on first use, inside a function that runs on the serving loop. Python 3.10+ binds lazily on its own.</p>
+  </div>
+
+  <div class="mt-4 rounded-md border-l-4 border-emerald-500 bg-emerald-50 px-4 py-3">
+    <p class="font-semibold text-emerald-900">In this project</p>
+    <p class="text-sm text-emerald-900 mt-1"><code>MAX_CONCURRENT_JOBS = 5</code> caps concurrent discovery jobs. Each job runs 8 worker coroutines that can each drive a Playwright context → peak <code>5 × 8 = 40</code> Chromium contexts (~2–4 GB RAM). It's the backstop for when per-IP rate limits get bypassed by many distinct IPs. It wraps <code>_run_job</code> (the background task), not the route handler — so the POST stays fast and the wait happens silently in the background.</p>
+  </div>
+</section>
+
+<!-- 6. THREADING & GIL -->
+<section id="threading" class="anchor">
+  <h2 class="text-2xl font-bold border-b pb-2">6 · Threading &amp; the GIL</h2>
+  <p class="mt-3 text-slate-700"><code>threading.Thread()</code> creates <strong>real OS threads</strong> — multiple threads, but all inside <strong>one process</strong>, sharing memory. That shared memory is the source of both threading's convenience and its hazard.</p>
+
+  <h3 class="mt-5 text-lg font-semibold">The race condition</h3>
+  <pre><code>counter = 0
+def increment():
+    global counter
+    for _ in range(1_000_000):
+        counter += 1            # NOT atomic — it's load, add, store
+
+# two threads running this → final counter is reliably LESS than 2,000,000</code></pre>
+  <p class="mt-2 text-slate-700"><code>counter += 1</code> is three steps (read → add → write). Threading is preemptive — the scheduler can switch <em>between</em> those steps. Two threads both read <code>5</code>, both write <code>6</code>; one increment is lost.</p>
+
+  <h3 class="mt-5 text-lg font-semibold">A Lock fixes it</h3>
+  <pre><code>lock = threading.Lock()
+def increment():
+    global counter
+    for _ in range(1_000_000):
+        with lock:              # acquire — block if another thread holds it
+            counter += 1        # only one thread can be in here at a time</code></pre>
+  <p class="mt-2 text-slate-700">A <code>Lock</code> (mutex) has two states, locked/unlocked. <code>acquire()</code> blocks the thread until the holder releases. It makes the block <em>effectively atomic</em>. (And — a <code>Lock</code> is conceptually <code>Semaphore(1)</code>. It's also exactly the lock you <em>don't</em> need in asyncio, because non-<code>await</code> code is already atomic.)</p>
+
+  <div class="mt-4 rounded-md border-l-4 border-indigo-500 bg-indigo-50 px-4 py-3">
+    <p class="font-semibold text-indigo-900">The GIL — Global Interpreter Lock</p>
+    <p class="text-sm text-indigo-900 mt-1">CPython has one lock that a thread <strong>must hold to execute Python bytecode</strong>. So even with many threads on a multi-core machine, <strong>only one runs Python bytecode at any instant</strong> — the rest wait for the GIL. It's handed off two ways at once: <strong>preemptively</strong> (taken away ~every 5 ms) and <strong>cooperatively</strong> (voluntarily released during blocking I/O). The GIL is essentially a <code>Semaphore(1)</code> around "running Python code".</p>
+  </div>
+
+  <p class="mt-4 text-slate-700">That second handoff — released during I/O — is <em>why threading still helps I/O-bound work</em>: while thread A waits on a network reply, it isn't holding the GIL, so thread B runs. But for <strong>CPU-bound pure-Python work, threading gives almost nothing</strong> — the GIL serialises it. 4 threads crunching numbers on 4 cores run about as fast as 1.</p>
+
+  <div class="mt-4 rounded-md border-l-4 border-amber-500 bg-amber-50 px-4 py-3">
+    <p class="text-sm text-amber-900">The limit is only on <strong>Python bytecode</strong>. Two threads both waiting on network I/O genuinely overlap. "Python can't use two cores" is wrong — "Python <em>bytecode</em> can't run on two cores at once" is right.</p>
+  </div>
+</section>
+
+<!-- 7. PROCESSES & WORKERS -->
+<section id="processes" class="anchor">
+  <h2 class="text-2xl font-bold border-b pb-2">7 · Processes &amp; Workers</h2>
+  <p class="mt-3 text-slate-700">Python <code>multiprocessing</code> and JavaScript <code>Worker</code>s are the same idea: <strong>a separate "computer" you talk to by sending letters.</strong> Its own memory, its own everything — you can't touch its variables, it can't touch yours.</p>
+
+  <pre><code># Python — a whole new interpreter per process, each with its OWN GIL
+from multiprocessing import Pool
+with Pool(4) as pool:
+    results = pool.map(heavy, [10_000_000] * 4)   # 4 cores, genuinely parallel</code></pre>
+  <pre><code>// JavaScript — a separate JS context, own heap
+const worker = new Worker('worker.js');
+worker.postMessage({ n: 10_000_000 });
+worker.onmessage = (e) =&gt; console.log('result:', e.data);</code></pre>
+
+  <div class="mt-4 rounded-md border-l-4 border-indigo-500 bg-indigo-50 px-4 py-3">
+    <p class="font-semibold text-indigo-900">Isolation by design</p>
+    <p class="text-sm text-indigo-900 mt-1">No shared memory → <strong>no race conditions, no locks</strong> → safe, genuine parallelism. The cost: communication is <strong>message passing</strong> — data is serialized and <em>copied</em> across the boundary (pickling in Python, structured clone in JS), and startup is heavyweight (a whole interpreter / JS context — so you pool and reuse them).</p>
+  </div>
+
+  <table class="mt-4">
+    <thead><tr><th></th><th>Thread</th><th>Process / Worker</th></tr></thead>
+    <tbody>
+      <tr><td>Memory</td><td>shared</td><td>isolated (own copy)</td></tr>
+      <tr><td>Communication</td><td>touch shared variables</td><td>message passing (copied)</td></tr>
+      <tr><td>Race conditions</td><td>yes — need locks</td><td>none — nothing shared</td></tr>
+      <tr><td>True parallelism</td><td>Python: no (GIL)</td><td><strong>yes</strong></td></tr>
+      <tr><td>Startup cost</td><td>cheap</td><td>expensive</td></tr>
+      <tr><td>One crashes</td><td>can take down the process</td><td>isolated — others survive</td></tr>
+    </tbody>
+  </table>
+
+  <p class="mt-4 text-slate-700"><strong>Reach for them when the work is CPU-bound</strong> — heavy math, media processing, ML, compression. In a browser, even a <em>single</em> Worker is worth it just to get a heavy loop <em>off the main thread</em> so the UI doesn't freeze.</p>
+
+  <div class="mt-4 rounded-md border-l-4 border-emerald-500 bg-emerald-50 px-4 py-3">
+    <p class="font-semibold text-emerald-900">In this project</p>
+    <p class="text-sm text-emerald-900 mt-1">You're already using process isolation — every Chromium that Playwright launches is a <strong>separate OS process</strong> with its own memory. The "40 browsers" under the semaphore are 40 isolated processes — which is exactly why they cost 2–4 GB RAM. The Python backend stays async (I/O-bound coordination); the CPU-heavy rendering is handed off to those separate processes. Textbook division of labour.</p>
+  </div>
+</section>
+
+<!-- 8. JAVASCRIPT -->
+<section id="javascript" class="anchor">
+  <h2 class="text-2xl font-bold border-b pb-2">8 · JavaScript's model (and how it maps)</h2>
+  <p class="mt-3 text-slate-700"><strong>Your JavaScript code: genuinely one thread, one call stack.</strong> Two pieces of your JS never run at once. While the call stack is non-empty, nothing else runs — the event loop pulls the next callback only when the stack is empty. Same cooperative model as Python's asyncio, same failure mode (a long sync loop freezes everything).</p>
+  <p class="mt-3 text-slate-700"><strong>The runtime around it: absolutely multi-threaded.</strong> When you <code>fetch()</code> or set a timer, the actual I/O happens on the browser's / Node's <em>other</em> threads (Node's libuv keeps a thread pool). They just hand results back to your one thread's event loop. "Single-threaded" describes the <em>programming model</em>, not the process.</p>
+  <p class="mt-3 text-slate-700"><strong>Workers</strong> are real extra threads — but <em>isolated</em>, message-passing, no shared memory. More like Python <code>multiprocessing</code> than <code>threading</code>.</p>
+
+  <div class="mt-4 rounded-md border-l-4 border-indigo-500 bg-indigo-50 px-4 py-3">
+    <p class="font-semibold text-indigo-900">The key mapping</p>
+    <p class="text-sm text-indigo-900 mt-1">JS is <strong>"one thread, many tasks"</strong> — that's Python <code>asyncio</code>, <em>not</em> Python <code>threading</code> ("many threads, one lock"). Don't say "JS is like Python" — Python has two models, and JS matches only the asyncio one.</p>
+  </div>
+
+  <table class="mt-4">
+    <thead><tr><th>Model</th><th>Threads running your code</th><th>Parallel?</th><th>Need locks?</th></tr></thead>
+    <tbody>
+      <tr><td>Python <code>asyncio</code></td><td>1</td><td>no</td><td>rarely (cooperative)</td></tr>
+      <tr><td>Python <code>threading</code></td><td>many (GIL serialises)</td><td>no</td><td>yes (shared memory + preemptive)</td></tr>
+      <tr><td>Python <code>multiprocessing</code></td><td>— (processes)</td><td><strong>yes</strong></td><td>no (isolated)</td></tr>
+      <tr><td>JS main thread</td><td>1</td><td>no</td><td>no</td></tr>
+      <tr><td>JS Workers</td><td>— (isolated)</td><td><strong>yes</strong></td><td>no (message passing)</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 9. RATE LIMITING -->
+<section id="ratelimit" class="anchor">
+  <h2 class="text-2xl font-bold border-b pb-2">9 · Rate limiting &amp; Redis</h2>
+  <p class="mt-3 text-slate-700">The implementation task that kicked all this off. Rate limiting answers two questions: <strong>who is asking</strong>, and <strong>how many times recently</strong>.</p>
+
+  <h3 class="mt-5 text-lg font-semibold">Redis &amp; <code>INCR</code></h3>
+  <p class="mt-2 text-slate-700">Redis is a key-value store — mentally, a big map of <code>string → string</code>. <code>INCR</code> is a Redis command: "increment this key's value by 1, return the new value." Crucially it's <strong>atomic</strong> — concurrent <code>INCR</code>s never lose updates, which is what makes it a safe rate-limit counter. Keys can carry a <strong>TTL</strong> (<code>EXPIRE</code>) — after which Redis auto-deletes them.</p>
+  <pre><code>key = "rl:discover:1.2.3.4"
+count = redis.INCR(key)              # atomic increment
+if count == 1: redis.EXPIRE(key, 3600)   # first hit? start the window
+if count &gt; 5: return 429              # over the limit</code></pre>
+
+  <h3 class="mt-5 text-lg font-semibold">Fixed window vs sliding window</h3>
+  <p class="mt-2 text-slate-700">Same "limit", different definition of <em>which 60-second period to look at</em>. Example — limit "3 per minute", 6 requests timed across a window boundary:</p>
+  <table class="mt-2">
+    <thead><tr><th>Approach</th><th>How</th><th>Result on the burst</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Fixed window</strong></td><td>one counter + TTL; resets when the TTL expires — a discrete reset event you can game</td><td>lets <strong>6</strong> through in 63s (3 before the reset, 3 after) — the boundary bug</td></tr>
+      <tr><td><strong>Sliding window</strong></td><td>stores individual timestamps; recomputes the count over the trailing 60s on every request</td><td>lets <strong>4</strong> through — old requests roll off continuously, no boundary to exploit</td></tr>
+    </tbody>
+  </table>
+  <p class="mt-3 text-slate-700">Fixed is cheap (1 <code>INCR</code> + 1 <code>EXPIRE</code>) and fine for a POC. Sliding is more accurate but 2–3× the Redis ops. Either way, per-IP limits cap <em>per-attacker</em> cost — a botnet with many IPs still gets through, which is why a <em>global</em> cost cap (the GCP kill switch) is the real ceiling.</p>
+
+  <h3 class="mt-5 text-lg font-semibold">The <code>X-Forwarded-For</code> trap &amp; <code>--proxy-headers</code></h3>
+  <p class="mt-2 text-slate-700">Behind a proxy (Railway's edge), the proxy opens a <em>new</em> TCP connection to your app — so <code>request.client.host</code> is the <em>proxy's</em> IP, not the user's. The real IP is in the <code>X-Forwarded-For</code> header.</p>
+  <ul class="mt-2 list-disc pl-6 text-slate-700 space-y-1">
+    <li><strong><code>--proxy-headers</code></strong> tells uvicorn: "trust <code>X-Forwarded-For</code> and rewrite <code>request.client.host</code> from it" (it fixes the http/https scheme from <code>X-Forwarded-Proto</code> too). Prod-only — locally there's no proxy.</li>
+    <li>Without it, every user collapses into <em>one</em> rate-limit bucket (the proxy's IP) — "5/hour per IP" silently becomes "5/hour for the whole internet".</li>
+    <li><strong>Trust</strong>: only believe the header from your <em>own</em> proxy — anyone can spoof <code>X-Forwarded-For</code> in a raw request. <code>--forwarded-allow-ips</code> is the "which proxies do I trust" half.</li>
+  </ul>
+
+  <h3 class="mt-5 text-lg font-semibold">Vocabulary picked up</h3>
+  <table class="mt-2">
+    <tbody>
+      <tr><td><strong>Edge protection</strong></td><td>mechanisms that run at the boundary of your system, <em>before</em> requests reach your app (Cloudflare, a CDN's bot-fight mode). "App-level only" = no edge layer, all protection inside FastAPI.</td></tr>
+      <tr><td><strong>slowapi</strong></td><td>a Python library that plugs rate-limiting decorators into FastAPI; uses the <code>limits</code> library underneath; storage backend is just a config string (<code>memory://</code> or <code>redis://…</code>).</td></tr>
+      <tr><td><strong>Hardening</strong></td><td>a loose term for the category of work that makes a system resistant to abuse / attack / failure — rate limits, secrets out of code, input validation, CORS allowlists, etc. Not features; robustness.</td></tr>
+      <tr><td><strong><code>headers_enabled</code></strong></td><td>slowapi flag — adds informational <code>X-RateLimit-*</code> headers so a well-behaved client can see its budget. Informational only; doesn't change enforcement.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- GLOSSARY -->
+<section id="glossary" class="anchor">
+  <h2 class="text-2xl font-bold border-b pb-2">10 · Glossary</h2>
+  <dl class="mt-4 space-y-2.5 text-sm">
+    <div><dt class="font-semibold inline">CPU-bound</dt><dd class="inline text-slate-700"> — work bottlenecked by computation; a CPU core pinned at 100%.</dd></div>
+    <div><dt class="font-semibold inline">I/O-bound</dt><dd class="inline text-slate-700"> — work bottlenecked by waiting on something external (network, disk, DB); CPU mostly idle.</dd></div>
+    <div><dt class="font-semibold inline">Concurrency</dt><dd class="inline text-slate-700"> — multiple tasks in progress over the same period, interleaved on one thread.</dd></div>
+    <div><dt class="font-semibold inline">Parallelism</dt><dd class="inline text-slate-700"> — multiple tasks executing at the same instant on different cores.</dd></div>
+    <div><dt class="font-semibold inline">Preemptive multitasking</dt><dd class="inline text-slate-700"> — an external scheduler can interrupt a task anytime (OS threads).</dd></div>
+    <div><dt class="font-semibold inline">Cooperative multitasking</dt><dd class="inline text-slate-700"> — tasks voluntarily yield control at explicit points (asyncio, JS event loop).</dd></div>
+    <div><dt class="font-semibold inline">Coroutine</dt><dd class="inline text-slate-700"> — what an <code>async def</code> call returns: an inert "frozen plan" that does nothing until driven by <code>await</code> / <code>create_task</code> / <code>asyncio.run</code>.</dd></div>
+    <div><dt class="font-semibold inline">Task</dt><dd class="inline text-slate-700"> — a coroutine that's been registered with the event loop so it runs concurrently. Created by <code>asyncio.create_task</code>.</dd></div>
+    <div><dt class="font-semibold inline">Event loop</dt><dd class="inline text-slate-700"> — the scheduler at the heart of asyncio/JS: runs a ready task until it suspends, then picks the next.</dd></div>
+    <div><dt class="font-semibold inline">Semaphore</dt><dd class="inline text-slate-700"> — a counter used as a permit pool; <code>acquire</code> takes a permit (or waits), <code>release</code> returns one. <code>Semaphore(1)</code> = a lock.</dd></div>
+    <div><dt class="font-semibold inline">Lock / mutex</dt><dd class="inline text-slate-700"> — ensures only one thread is in a critical section at a time; <code>acquire</code> blocks until free.</dd></div>
+    <div><dt class="font-semibold inline">Race condition</dt><dd class="inline text-slate-700"> — a bug where the result depends on the nondeterministic interleaving of concurrent tasks touching shared state.</dd></div>
+    <div><dt class="font-semibold inline">GIL (Global Interpreter Lock)</dt><dd class="inline text-slate-700"> — CPython's single lock; only the thread holding it runs Python bytecode. Released during I/O.</dd></div>
+    <div><dt class="font-semibold inline">Thread</dt><dd class="inline text-slate-700"> — a unit of execution inside a process; threads in one process share memory.</dd></div>
+    <div><dt class="font-semibold inline">Process</dt><dd class="inline text-slate-700"> — a running program instance with its own private memory; heavyweight.</dd></div>
+    <div><dt class="font-semibold inline">Worker (JS)</dt><dd class="inline text-slate-700"> — an isolated extra JS context (own heap), communicating by message passing — JS's equivalent of <code>multiprocessing</code>.</dd></div>
+    <div><dt class="font-semibold inline">Redis</dt><dd class="inline text-slate-700"> — in-memory key-value store; used here for atomic rate-limit counters (<code>INCR</code> + <code>EXPIRE</code>).</dd></div>
+    <div><dt class="font-semibold inline">TTL</dt><dd class="inline text-slate-700"> — time-to-live; how long a Redis key survives before auto-deletion.</dd></div>
+    <div><dt class="font-semibold inline">X-Forwarded-For</dt><dd class="inline text-slate-700"> — HTTP header a proxy adds to record the original client IP; trustworthy only when added by your own infrastructure.</dd></div>
+  </dl>
+</section>
+
+<footer class="mt-16 pt-6 border-t border-slate-200 text-xs text-slate-500">
+  <p>Personal learning notes — captured from a working session on the t-time-ai backend. Companion to <code>production-deployment-plan.html</code>.</p>
+</footer>
+
+</main>
+</body>
+</html>
