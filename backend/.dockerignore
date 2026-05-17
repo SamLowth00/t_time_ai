@@ -1,0 +1,26 @@
+# Defense in depth — the Dockerfile already uses explicit COPY of just the files
+# it needs, but this guards against future "COPY . ." regressions and accidental
+# inclusion of secrets / caches if the COPY pattern ever changes.
+
+# Local secrets
+.env
+.env.local
+.env.*.local
+
+# Python build & cache artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# VCS / tooling
+.git/
+.gitignore
+.idea/
+.vscode/
+
+# OS noise
+.DS_Store
+Thumbs.db
