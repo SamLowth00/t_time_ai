@@ -10,7 +10,7 @@ venv/
 .env
 
 # Poetry
-poetry.lock
+# poetry.lock
 
 # Node
 node_modules/
