@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir poetry==1.8.3 \
 # the (slow) `poetry install` layer is only rebuilt when pyproject.toml or poetry.lock
 # actually change. Editing app/ code → only the cheap last layer rebuilds.
 COPY pyproject.toml poetry.lock ./
-RUN poetry install --no-interaction --no-ansi --without dev --no-root
+RUN poetry install --no-interaction --no-ansi --no-root
 
 COPY app ./app
 

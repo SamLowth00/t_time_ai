@@ -1,0 +1,22 @@
+# Defense in depth — Dockerfile uses selective COPY of `package*.json` and
+# `.` (after them), but this prevents heavy/secret stuff sneaking in.
+
+# Local secrets
+.env
+.env.local
+.env.*.local
+
+# Node artifacts that should be rebuilt fresh in Docker — not copied in
+node_modules/
+dist/
+*.tsbuildinfo
+
+# VCS / tooling
+.git/
+.gitignore
+.idea/
+.vscode/
+
+# OS noise
+.DS_Store
+Thumbs.db
