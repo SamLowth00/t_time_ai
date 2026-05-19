@@ -30,4 +30,4 @@ EXPOSE 8000
 # --forwarded-     ─┘  request.client.host from it. Without these flags the rate
 #   allow-ips="*"      limiter sees Railway's proxy IP for every request and
 #                      every user collapses into one bucket.
-CMD uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers --forwarded-allow-ips="*"
+CMD exec uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers --forwarded-allow-ips="*"
