@@ -94,6 +94,11 @@ async def scrape_tee_times(url: str, iso_date: str, players: int) -> list[TeeTim
     # POC assumption: course_id is always 1.
     api_url = f"{origin}/api/casualBooking/teesheet?date={iso_date}&course_id=1"
 
+    # BRS's visitor site is a hash-routed SPA with no per-slot URLs; the casual
+    # booking tee sheet for course 1 is the deepest link we can deep-link to.
+    # (The date is held in SPA state, not the URL, so we can't preselect it.)
+    booking_url = f"{club_url}#/course/1"
+
     async with async_playwright() as p:
         request = await p.request.new_context(
             extra_http_headers={
@@ -134,7 +139,7 @@ async def scrape_tee_times(url: str, iso_date: str, players: int) -> list[TeeTim
                     TeeTime(
                         time=str(time_text),
                         price=_extract_price(tee, players),
-                        booking_url=None,
+                        booking_url=booking_url,
                     )
                 )
 

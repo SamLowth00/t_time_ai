@@ -13,9 +13,11 @@ from app.models.tee_time import (
     ClubsFoundEvent,
     GolfClub,
     JobDoneEvent,
+    TeeTime,
 )
 from app.scraping import VENDOR_SCRAPERS
 from app.scraping.nearby_clubs import find_nearby_golf_clubs
+from app.scraping.normalize import normalize_price, normalize_time
 from app.scraping.webcrawler import RobotsDisallowedError, discover_booking_url
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,23 @@ def _get_discovery_semaphore() -> asyncio.Semaphore:
     if _discovery_semaphore is None:
         _discovery_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
     return _discovery_semaphore
+
+
+def _uniform_tee_times(
+    tee_times: list[TeeTime], fallback_booking_url: str
+) -> list[TeeTime]:
+    """Coerce every vendor's tee times into one shape: `£X.XX` price, 24-hour
+    `HH:MM` time, and a booking link on every row (falling back to the club's
+    discovered booking URL when the scraper couldn't produce a per-slot link).
+    """
+    return [
+        TeeTime(
+            time=normalize_time(tt.time),
+            price=normalize_price(tt.price),
+            booking_url=tt.booking_url or fallback_booking_url,
+        )
+        for tt in tee_times
+    ]
 
 
 def start_job(place_id: str, radius_km: float, iso_date: str, players: int) -> str:
@@ -204,7 +223,7 @@ async def _process_club(
             place_id=club.place_id,
             booking_url=crawl.booking_url,
             vendor=crawl.vendor,
-            tee_times=tee_times,
+            tee_times=_uniform_tee_times(tee_times, crawl.booking_url),
         )
     )
     return True
