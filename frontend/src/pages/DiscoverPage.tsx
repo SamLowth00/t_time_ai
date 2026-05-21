@@ -7,7 +7,7 @@ import {
   type UnsuccessfulReason,
   type Vendor,
 } from "../api/discovery";
-import type { GolfClub, TeeTime } from "../api/types";
+import type { GolfClub, LocationSelection, TeeTime } from "../api/types";
 import LocationPicker from "../components/LocationPicker";
 import TeeTimeResults from "../components/TeeTimeResults";
 
@@ -115,7 +115,7 @@ function todayIso(): string {
 }
 
 export default function DiscoverPage() {
-  const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
+  const [selection, setSelection] = useState<LocationSelection | null>(null);
   const [radiusKm, setRadiusKm] = useState(20);
   const [date, setDate] = useState(todayIso());
   const [players, setPlayers] = useState(2);
@@ -133,14 +133,18 @@ export default function DiscoverPage() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!selectedPlaceId) return;
+    if (!selection) return;
     setError(null);
     setSubmitting(true);
     unsubscribeRef.current?.();
     dispatch({ type: "clubs_found", clubs: [] });
     try {
+      const location =
+        selection.kind === "place"
+          ? { place_id: selection.place_id }
+          : { lat: selection.lat, lng: selection.lng };
       const { job_id } = await startJob({
-        place_id: selectedPlaceId,
+        ...location,
         radius_km: radiusKm,
         date,
         players,
@@ -178,9 +182,7 @@ export default function DiscoverPage() {
           onSubmit={onSubmit}
           className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
         >
-          <LocationPicker
-            onSelect={(s) => setSelectedPlaceId(s?.place_id ?? null)}
-          />
+          <LocationPicker onSelect={setSelection} />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
               <label className="block text-sm font-medium text-gray-700">
@@ -225,7 +227,7 @@ export default function DiscoverPage() {
           </div>
           <button
             type="submit"
-            disabled={submitting || !selectedPlaceId}
+            disabled={submitting || !selection}
             className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
           >
             {submitting ? "Starting…" : "Discover tee times"}

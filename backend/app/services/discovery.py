@@ -71,10 +71,20 @@ def _uniform_tee_times(
     ]
 
 
-def start_job(place_id: str, radius_km: float, iso_date: str, players: int) -> str:
+def start_job(
+    radius_km: float,
+    iso_date: str,
+    players: int,
+    *,
+    place_id: Optional[str] = None,
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+) -> str:
     job_id = uuid.uuid4().hex
     JOBS[job_id] = asyncio.Queue()
-    asyncio.create_task(_run_job(job_id, place_id, radius_km, iso_date, players))
+    asyncio.create_task(
+        _run_job(job_id, radius_km, iso_date, players, place_id, lat, lng)
+    )
     return job_id
 
 
@@ -94,10 +104,12 @@ async def subscribe(job_id: str) -> AsyncIterator[BaseModel]:
 
 async def _run_job(
     job_id: str,
-    place_id: str,
     radius_km: float,
     iso_date: str,
     players: int,
+    place_id: Optional[str],
+    lat: Optional[float],
+    lng: Optional[float],
 ) -> None:
     queue = JOBS[job_id]
     success_count = 0
@@ -106,7 +118,11 @@ async def _run_job(
     async with _get_discovery_semaphore():
         try:
             clubs = await find_nearby_golf_clubs(
-                place_id, radius_km, max_results=MAX_CANDIDATES
+                radius_km,
+                place_id=place_id,
+                lat=lat,
+                lng=lng,
+                max_results=MAX_CANDIDATES,
             )
             queue.put_nowait(ClubsFoundEvent(clubs=clubs))
 

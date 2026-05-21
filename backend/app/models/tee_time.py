@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class TeeTime(BaseModel):
@@ -37,10 +37,22 @@ UnsuccessfulReason = Literal[
 
 
 class DiscoverRequest(BaseModel):
-    place_id: str
+    # Either pick a place from autocomplete (place_id) or use the browser's
+    # current location (lat/lng). Coords skip the Place Details lookup since
+    # find_nearby_golf_clubs only needs a centre point.
+    place_id: Optional[str] = None
+    lat: Optional[float] = Field(default=None, ge=-90, le=90)
+    lng: Optional[float] = Field(default=None, ge=-180, le=180)
     radius_km: float = Field(gt=0, le=50)
     date: date
     players: int = Field(ge=1, le=4)
+
+    @model_validator(mode="after")
+    def _require_location(self) -> "DiscoverRequest":
+        has_coords = self.lat is not None and self.lng is not None
+        if not self.place_id and not has_coords:
+            raise ValueError("Provide either place_id or both lat and lng")
+        return self
 
 
 class JobStartResponse(BaseModel):

@@ -14,10 +14,12 @@ async def post_discover(
     request: Request, response: Response, payload: DiscoverRequest
 ) -> JobStartResponse:
     job_id = start_job(
-        place_id=payload.place_id,
         radius_km=payload.radius_km,
         iso_date=payload.date.isoformat(),
         players=payload.players,
+        place_id=payload.place_id,
+        lat=payload.lat,
+        lng=payload.lng,
     )
     return JobStartResponse(job_id=job_id)
 

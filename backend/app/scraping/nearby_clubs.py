@@ -1,5 +1,6 @@
 import os
 import re
+from typing import Optional
 
 import httpx
 
@@ -79,27 +80,38 @@ async def search_locations(query: str) -> list[LocationSuggestion]:
 
 
 async def find_nearby_golf_clubs(
-    place_id: str, radius_km: float, max_results: int = 10
+    radius_km: float,
+    *,
+    place_id: Optional[str] = None,
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+    max_results: int = 10,
 ) -> list[GolfClub]:
+    """Find golf clubs near a centre point. Supply either a `place_id`
+    (resolved to lat/lng via Place Details) or `lat`/`lng` directly — the
+    latter lets the browser's geolocation skip the extra lookup."""
     api_key = _api_key()
     radius_m = radius_km * 1000
     max_results = max(1, min(max_results, 20))
 
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        details = await client.get(
-            f"{PLACES_BASE}/places/{place_id}",
-            headers={
-                "X-Goog-Api-Key": api_key,
-                "X-Goog-FieldMask": "location",
-            },
-        )
-        if details.status_code != 200:
-            raise ScrapeError(f"Place details failed ({details.status_code}): {details.text}")
-        loc = details.json().get("location") or {}
-        lat = loc.get("latitude")
-        lng = loc.get("longitude")
         if lat is None or lng is None:
-            raise ScrapeError(f"Place {place_id} has no location")
+            if not place_id:
+                raise ScrapeError("find_nearby_golf_clubs needs place_id or lat/lng")
+            details = await client.get(
+                f"{PLACES_BASE}/places/{place_id}",
+                headers={
+                    "X-Goog-Api-Key": api_key,
+                    "X-Goog-FieldMask": "location",
+                },
+            )
+            if details.status_code != 200:
+                raise ScrapeError(f"Place details failed ({details.status_code}): {details.text}")
+            loc = details.json().get("location") or {}
+            lat = loc.get("latitude")
+            lng = loc.get("longitude")
+            if lat is None or lng is None:
+                raise ScrapeError(f"Place {place_id} has no location")
 
         # searchText uses Google's editorial taxonomy — catches UK private
         # clubs tagged as `sports_club` (Lees Hall, Hallamshire, …) that

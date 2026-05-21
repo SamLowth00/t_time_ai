@@ -36,7 +36,9 @@ export type DiscoveryEvent =
   | { type: "done"; reason: JobDoneReason; successful: number };
 
 export type DiscoverRequest = {
-  place_id: string;
+  place_id?: string;
+  lat?: number;
+  lng?: number;
   radius_km: number;
   date: string;
   players: number;

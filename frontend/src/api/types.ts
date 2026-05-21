@@ -15,3 +15,9 @@ export type LocationSuggestion = {
   place_id: string;
   label: string;
 };
+
+// What the LocationPicker hands back: either an autocomplete pick (place_id)
+// or the browser's current location (lat/lng).
+export type LocationSelection =
+  | { kind: "place"; place_id: string; label: string }
+  | { kind: "coords"; lat: number; lng: number; label: string };
