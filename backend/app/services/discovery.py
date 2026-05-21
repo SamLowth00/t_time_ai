@@ -117,14 +117,18 @@ async def _run_job(
     # client may already be subscribed; its SSE stream stays silent until we're in.
     async with _get_discovery_semaphore():
         try:
-            clubs = await find_nearby_golf_clubs(
+            (center_lat, center_lng), clubs = await find_nearby_golf_clubs(
                 radius_km,
                 place_id=place_id,
                 lat=lat,
                 lng=lng,
                 max_results=MAX_CANDIDATES,
             )
-            queue.put_nowait(ClubsFoundEvent(clubs=clubs))
+            queue.put_nowait(
+                ClubsFoundEvent(
+                    clubs=clubs, center_lat=center_lat, center_lng=center_lng
+                )
+            )
 
             # Workers pull from this in distance order; earliest = nearest.
             club_queue: asyncio.Queue = asyncio.Queue()

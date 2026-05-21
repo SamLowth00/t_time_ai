@@ -9,6 +9,8 @@ export type GolfClub = {
   name: string;
   address: string | null;
   website: string | null;
+  lat: number | null;
+  lng: number | null;
 };
 
 export type LocationSuggestion = {

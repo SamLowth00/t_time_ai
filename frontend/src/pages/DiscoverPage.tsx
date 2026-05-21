@@ -1,4 +1,11 @@
-import { useEffect, useReducer, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import {
   startJob,
   subscribeToJob,
@@ -8,8 +15,24 @@ import {
   type Vendor,
 } from "../api/discovery";
 import type { GolfClub, LocationSelection, TeeTime } from "../api/types";
+import ClubMap from "../components/ClubMap";
 import LocationPicker from "../components/LocationPicker";
 import TeeTimeResults from "../components/TeeTimeResults";
+
+// Distinct colours so each course can be visually linked across the map pins,
+// the filter checkboxes, and its rows in the merged table.
+export const PALETTE = [
+  "#2563eb",
+  "#16a34a",
+  "#db2777",
+  "#d97706",
+  "#7c3aed",
+  "#0891b2",
+  "#dc2626",
+  "#65a30d",
+  "#c026d3",
+  "#0d9488",
+];
 
 type ScanStatus = "finding_booking_url" | "fetching_tee_times";
 
@@ -31,6 +54,7 @@ type State = {
   scanning: Record<string, ScanStatus>;
   successful: SuccessRow[];
   unsuccessful: FailureRow[];
+  center: { lat: number; lng: number } | null;
   done: boolean;
   doneReason: JobDoneReason | null;
 };
@@ -40,6 +64,7 @@ const initialState: State = {
   scanning: {},
   successful: [],
   unsuccessful: [],
+  center: null,
   done: false,
   doneReason: null,
 };
@@ -49,7 +74,11 @@ function reduce(state: State, event: DiscoveryEvent): State {
     case "clubs_found": {
       const clubs: Record<string, GolfClub> = {};
       for (const c of event.clubs) clubs[c.place_id] = c;
-      return { ...initialState, clubs };
+      const center =
+        event.center_lat != null && event.center_lng != null
+          ? { lat: event.center_lat, lng: event.center_lng }
+          : null;
+      return { ...initialState, clubs, center };
     }
     case "club_started":
       return {
@@ -125,6 +154,55 @@ export default function DiscoverPage() {
   const [hasJob, setHasJob] = useState(false);
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
+  // Which courses are shown. Shared by the map pins and the results filter.
+  // New courses stream in over time and default to on.
+  const [enabled, setEnabled] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setEnabled((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const row of state.successful) {
+        if (!(row.place_id in next)) {
+          next[row.place_id] = true;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [state.successful]);
+
+  const colorFor = useMemo(() => {
+    const map: Record<string, string> = {};
+    state.successful.forEach((row, i) => {
+      map[row.place_id] = PALETTE[i % PALETTE.length];
+    });
+    return map;
+  }, [state.successful]);
+
+  const toggle = (placeId: string) =>
+    setEnabled((prev) => ({ ...prev, [placeId]: prev[placeId] === false }));
+
+  const setAll = (on: boolean) =>
+    setEnabled((prev) => {
+      const next = { ...prev };
+      for (const row of state.successful) next[row.place_id] = on;
+      return next;
+    });
+
+  // Pin click: while everything is on, isolate this club; otherwise toggle it.
+  const onMarkerClick = (placeId: string) =>
+    setEnabled((prev) => {
+      const allOn = state.successful.every((r) => prev[r.place_id] !== false);
+      if (allOn) {
+        const next: Record<string, boolean> = {};
+        for (const r of state.successful)
+          next[r.place_id] = r.place_id === placeId;
+        return next;
+      }
+      return { ...prev, [placeId]: prev[placeId] === false };
+    });
+
   useEffect(() => {
     return () => {
       unsubscribeRef.current?.();
@@ -137,7 +215,7 @@ export default function DiscoverPage() {
     setError(null);
     setSubmitting(true);
     unsubscribeRef.current?.();
-    dispatch({ type: "clubs_found", clubs: [] });
+    dispatch({ type: "clubs_found", clubs: [], center_lat: null, center_lng: null });
     try {
       const location =
         selection.kind === "place"
@@ -276,12 +354,29 @@ export default function DiscoverPage() {
               ))}
             </Section>
 
+            <ClubMap
+              successful={state.successful}
+              clubs={state.clubs}
+              enabled={enabled}
+              colorFor={colorFor}
+              onMarkerClick={onMarkerClick}
+              center={state.center}
+              centerLabel={selection?.label ?? null}
+            />
+
             <Section
               title="Successful"
               count={state.successful.length}
               empty="None yet."
             >
-              <TeeTimeResults rows={state.successful} clubs={state.clubs} />
+              <TeeTimeResults
+                rows={state.successful}
+                clubs={state.clubs}
+                enabled={enabled}
+                colorFor={colorFor}
+                toggle={toggle}
+                setAll={setAll}
+              />
             </Section>
 
             <Section

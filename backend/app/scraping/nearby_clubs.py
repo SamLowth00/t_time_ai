@@ -86,10 +86,13 @@ async def find_nearby_golf_clubs(
     lat: Optional[float] = None,
     lng: Optional[float] = None,
     max_results: int = 10,
-) -> list[GolfClub]:
+) -> tuple[tuple[float, float], list[GolfClub]]:
     """Find golf clubs near a centre point. Supply either a `place_id`
     (resolved to lat/lng via Place Details) or `lat`/`lng` directly — the
-    latter lets the browser's geolocation skip the extra lookup."""
+    latter lets the browser's geolocation skip the extra lookup.
+
+    Returns `((center_lat, center_lng), clubs)` — the resolved centre is handy
+    for pinning the search origin on a map."""
     api_key = _api_key()
     radius_m = radius_km * 1000
     max_results = max(1, min(max_results, 20))
@@ -123,7 +126,8 @@ async def find_nearby_golf_clubs(
                 "X-Goog-Api-Key": api_key,
                 "X-Goog-FieldMask": (
                     "places.id,places.displayName,places.formattedAddress,"
-                    "places.websiteUri,places.primaryType,places.userRatingCount"
+                    "places.websiteUri,places.primaryType,places.userRatingCount,"
+                    "places.location"
                 ),
                 "Content-Type": "application/json",
             },
@@ -147,12 +151,15 @@ async def find_nearby_golf_clubs(
         if not _is_real_golf_course(p):
             continue
         name = (p.get("displayName") or {}).get("text") or p.get("id", "")
+        loc = p.get("location") or {}
         clubs.append(
             GolfClub(
                 place_id=p.get("id", ""),
                 name=name,
                 address=p.get("formattedAddress"),
                 website=p.get("websiteUri"),
+                lat=loc.get("latitude"),
+                lng=loc.get("longitude"),
             )
         )
-    return clubs
+    return (lat, lng), clubs

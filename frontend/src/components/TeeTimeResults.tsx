@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { GolfClub, TeeTime } from "../api/types";
 
 export type SuccessfulClub = {
@@ -9,21 +9,6 @@ export type SuccessfulClub = {
 const DAY_START = 0; // 00:00 in minutes
 const DAY_END = 1440; // 24:00 in minutes
 const STEP = 15;
-
-// Distinct colours so each course can be visually linked between the
-// filter checkboxes and its rows in the merged table.
-const PALETTE = [
-  "#2563eb",
-  "#16a34a",
-  "#db2777",
-  "#d97706",
-  "#7c3aed",
-  "#0891b2",
-  "#dc2626",
-  "#65a30d",
-  "#c026d3",
-  "#0d9488",
-];
 
 function parseMinutes(time: string): number | null {
   const m = /^(\d{1,2}):(\d{2})/.exec(time.trim());
@@ -44,35 +29,19 @@ function formatMinutes(total: number): string {
 export default function TeeTimeResults({
   rows,
   clubs,
+  enabled,
+  colorFor,
+  toggle,
+  setAll,
 }: {
   rows: SuccessfulClub[];
   clubs: Record<string, GolfClub>;
+  enabled: Record<string, boolean>;
+  colorFor: Record<string, string>;
+  toggle: (placeId: string) => void;
+  setAll: (on: boolean) => void;
 }) {
-  // Which courses are shown. New courses stream in over time and default to on.
-  const [enabled, setEnabled] = useState<Record<string, boolean>>({});
   const [range, setRange] = useState<[number, number]>([DAY_START, DAY_END]);
-
-  useEffect(() => {
-    setEnabled((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      for (const row of rows) {
-        if (!(row.place_id in next)) {
-          next[row.place_id] = true;
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [rows]);
-
-  const colorFor = useMemo(() => {
-    const map: Record<string, string> = {};
-    rows.forEach((row, i) => {
-      map[row.place_id] = PALETTE[i % PALETTE.length];
-    });
-    return map;
-  }, [rows]);
 
   const combined = useMemo(() => {
     const all = rows.flatMap((row) =>
@@ -102,15 +71,6 @@ export default function TeeTimeResults({
   );
 
   const allOn = rows.every((r) => enabled[r.place_id] !== false);
-  const setAll = (on: boolean) => {
-    setEnabled((prev) => {
-      const next = { ...prev };
-      for (const row of rows) next[row.place_id] = on;
-      return next;
-    });
-  };
-  const toggle = (placeId: string) =>
-    setEnabled((prev) => ({ ...prev, [placeId]: prev[placeId] === false }));
 
   return (
     <div className="space-y-4 p-4">

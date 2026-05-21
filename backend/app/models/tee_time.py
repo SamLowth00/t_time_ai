@@ -20,6 +20,8 @@ class GolfClub(BaseModel):
     name: str
     address: Optional[str] = None
     website: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
 
 
 class LocationSearchResponse(BaseModel):
@@ -62,6 +64,10 @@ class JobStartResponse(BaseModel):
 class ClubsFoundEvent(BaseModel):
     type: Literal["clubs_found"] = "clubs_found"
     clubs: list[GolfClub]
+    # Resolved search centre (the area/coords the user searched from), so the
+    # frontend can pin it on the map.
+    center_lat: Optional[float] = None
+    center_lng: Optional[float] = None
 
 
 class ClubStartedEvent(BaseModel):

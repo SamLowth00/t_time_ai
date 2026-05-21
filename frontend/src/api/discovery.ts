@@ -12,7 +12,12 @@ export type UnsuccessfulReason =
 export type JobDoneReason = "target_reached" | "exhausted";
 
 export type DiscoveryEvent =
-  | { type: "clubs_found"; clubs: GolfClub[] }
+  | {
+      type: "clubs_found";
+      clubs: GolfClub[];
+      center_lat: number | null;
+      center_lng: number | null;
+    }
   | { type: "club_started"; place_id: string }
   | {
       type: "club_booking_found";
