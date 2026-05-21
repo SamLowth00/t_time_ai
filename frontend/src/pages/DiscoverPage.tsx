@@ -9,7 +9,7 @@ import {
 } from "../api/discovery";
 import type { GolfClub, TeeTime } from "../api/types";
 import LocationPicker from "../components/LocationPicker";
-import TeeTimeTable from "../components/TeeTimeTable";
+import TeeTimeResults from "../components/TeeTimeResults";
 
 type ScanStatus = "finding_booking_url" | "fetching_tee_times";
 
@@ -254,6 +254,7 @@ export default function DiscoverPage() {
               title="Scanning"
               count={scanningEntries.length}
               empty={state.done ? "Nothing in flight." : "Waiting…"}
+              scroll
             >
               {scanningEntries.map(([placeId, status]) => (
                 <div
@@ -278,26 +279,7 @@ export default function DiscoverPage() {
               count={state.successful.length}
               empty="None yet."
             >
-              {state.successful.map((row) => (
-                <details
-                  key={row.place_id}
-                  className="px-4 py-3 text-sm"
-                  open
-                >
-                  <summary className="cursor-pointer">
-                    <span className="font-medium text-gray-900">
-                      {state.clubs[row.place_id]?.name ?? row.place_id}
-                    </span>{" "}
-                    <span className="text-xs text-gray-500">
-                      ({row.vendor}, {row.tee_times.length} tee time
-                      {row.tee_times.length === 1 ? "" : "s"})
-                    </span>
-                  </summary>
-                  <div className="mt-3">
-                    <TeeTimeTable teeTimes={row.tee_times} />
-                  </div>
-                </details>
-              ))}
+              <TeeTimeResults rows={state.successful} clubs={state.clubs} />
             </Section>
 
             <Section
@@ -328,11 +310,13 @@ function Section({
   title,
   count,
   empty,
+  scroll = false,
   children,
 }: {
   title: string;
   count: number;
   empty: string;
+  scroll?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -343,7 +327,13 @@ function Section({
       {count === 0 ? (
         <p className="px-4 py-3 text-sm text-gray-500 italic">{empty}</p>
       ) : (
-        <div className="divide-y divide-gray-100">{children}</div>
+        <div
+          className={`divide-y divide-gray-100${
+            scroll ? " max-h-72 overflow-y-auto" : ""
+          }`}
+        >
+          {children}
+        </div>
       )}
     </div>
   );
