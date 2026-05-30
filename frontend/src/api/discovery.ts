@@ -2,7 +2,7 @@ import type { GolfClub, TeeTime } from "./types";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
-export type Vendor = "clubv1" | "chronogolf" | "brsgolf" | "intelligentgolf";
+export type Vendor = "clubv1" | "chronogolf" | "brsgolf" | "intelligentgolf" | "golfmanager";
 export type UnsuccessfulReason =
   | "no_website"
   | "no_booking_url"
@@ -56,6 +56,15 @@ export async function startJob(req: DiscoverRequest): Promise<{ job_id: string }
     body: JSON.stringify(req),
   });
   if (!res.ok) {
+    if (res.status === 429) {
+      const retryAfter = res.headers.get("Retry-After");
+      const minutes = retryAfter ? Math.ceil(Number(retryAfter) / 60) : null;
+      throw new Error(
+        minutes
+          ? `You've made too many searches. Please try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`
+          : "You've made too many searches. Please try again later.",
+      );
+    }
     const text = await res.text();
     throw new Error(`${res.status}: ${text}`);
   }

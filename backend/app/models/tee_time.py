@@ -28,7 +28,7 @@ class LocationSearchResponse(BaseModel):
     suggestions: list[LocationSuggestion]
 
 
-Vendor = Literal["clubv1", "chronogolf", "brsgolf", "intelligentgolf"]
+Vendor = Literal["clubv1", "chronogolf", "brsgolf", "intelligentgolf", "golfmanager"]
 UnsuccessfulReason = Literal[
     "no_website",
     "no_booking_url",

@@ -30,6 +30,7 @@ VENDOR_FRAGMENTS: list[tuple[str, str]] = [
     ("brsgolf", "brsgolf"),
     ("clubv1", "clubv1"),
     ("chronogolf", "chronogolf"),
+    ("golfmanager", "golfmanager"),
     # IntelligentGolf hosts whole club sites under *.intelligentgolf.co.uk, so the
     # host isn't a reliable signal. The booking widget always lives at /visitorbooking.
     ("/visitorbooking", "intelligentgolf"),
@@ -49,6 +50,14 @@ _PRIORITY_PATH_RE = re.compile(
     re.IGNORECASE,
 )
 _SKIP_SCHEMES = ("mailto:", "tel:", "javascript:", "data:", "#")
+
+# Some club sites link their booking widget with a leading slash in front of a
+# full absolute URL, e.g. href="/https://club.intelligentgolf.co.uk/visitorbooking/".
+# urljoin() would treat that as an absolute path on the club's own origin and nest
+# the two URLs (https://club-site/https://club.intelligentgolf.co.uk/...), which then
+# both vendor-matches and gets POSTed to the wrong host. Anchored to the start so we
+# don't disturb legitimate redirect-style query params like ?url=https://other.
+_LEADING_SLASH_ABS_URL_RE = re.compile(r"^/+(https?://.+)$", re.IGNORECASE | re.DOTALL)
 
 # Parsed when robots.txt is missing or unreadable — explicit allow-all so a failed
 # robots fetch does not block legitimate crawls (same behaviour as an empty file).
@@ -155,6 +164,11 @@ def _is_dns_error(exc: Exception) -> bool:
     return "ENOTFOUND" in msg or "getaddrinfo" in msg
 
 
+def _is_socket_hangup_error(exc: Exception) -> bool:
+    msg = str(exc)
+    return "socket hang up" in msg or "ECONNRESET" in msg
+
+
 def _same_origin(candidate: str, start_host: str) -> bool:
     try:
         return _strip_www(urlparse(candidate).netloc) == start_host
@@ -213,6 +227,7 @@ async def _crawl(start_url: str) -> CrawlResult:
         )
         try:
             is_start = True
+            start_host_rebased = False
             while (priority_q or normal_q) and len(visited) < MAX_PAGES:
                 url, depth = priority_q.popleft() if priority_q else normal_q.popleft()
                 key = _normalize_for_dedup(url)
@@ -239,6 +254,23 @@ async def _crawl(start_url: str) -> CrawlResult:
                             raise ScrapeError(
                                 f"Failed to fetch {url}: {retry_exc}"
                             ) from retry_exc
+                    elif is_start and _is_socket_hangup_error(exc) and url.startswith("http://"):
+                        # Some servers (e.g. IntelligentGolf's igserver) issue a secure
+                        # session cookie on the HTTP→HTTPS 302 redirect. When the
+                        # APIRequestContext presents that cookie on the HTTPS follow-up
+                        # the server detects the non-browser hand-off and drops the
+                        # connection. Retrying HTTPS directly avoids the redirect chain
+                        # so no suspicious cookie is attached on the first HTTPS request.
+                        https_url = "https://" + url[7:]
+                        await asyncio.sleep(0.5)
+                        try:
+                            resp = await request.get(https_url, timeout=PER_REQUEST_TIMEOUT_MS)
+                            url = https_url
+                            visited.add(_normalize_for_dedup(https_url))
+                        except Exception as retry_exc:
+                            raise ScrapeError(
+                                f"Failed to fetch {url}: {retry_exc}"
+                            ) from retry_exc
                     elif is_start:
                         raise ScrapeError(f"Failed to fetch {url}: {exc}") from exc
                     else:
@@ -247,6 +279,19 @@ async def _crawl(start_url: str) -> CrawlResult:
                     is_start = False
 
                 final_url = resp.url
+
+                # If the start URL redirected to a different host, rebase the
+                # same-origin anchor to the redirect target. Otherwise the whole
+                # (redirected) site is treated as cross-origin and never walked —
+                # its own booking pages get mis-flagged as an unsupported vendor.
+                # e.g. sitwellgolf.co.uk -> sitwellgolfclub.com, whose /visitors/
+                # page embeds a BRS booking iframe.
+                if not start_host_rebased:
+                    start_host_rebased = True
+                    final_host = _strip_www(urlparse(final_url).netloc)
+                    if final_host and final_host != start_host:
+                        start_host = final_host
+
                 vendor = _match_vendor(final_url)
                 if vendor:
                     return CrawlResult(final_url, vendor, len(visited))
@@ -266,6 +311,11 @@ async def _crawl(start_url: str) -> CrawlResult:
                     lowered = raw_stripped.lower()
                     if any(lowered.startswith(p) for p in _SKIP_SCHEMES):
                         continue
+                    # Recover an absolute URL that was mistakenly slash-prefixed, so
+                    # urljoin doesn't nest it under the club's own origin.
+                    embedded = _LEADING_SLASH_ABS_URL_RE.match(raw_stripped)
+                    if embedded:
+                        raw_stripped = embedded.group(1)
                     absolute = urljoin(final_url, raw_stripped)
                     parsed = urlparse(absolute)
                     if parsed.scheme not in ("http", "https"):

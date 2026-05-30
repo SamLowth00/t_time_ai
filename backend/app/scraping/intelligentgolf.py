@@ -31,8 +31,27 @@ _USER_AGENT = (
 # so we canonicalize before posting.
 _VISITORBOOKING_PATH_RE = re.compile(r"/visitorbooking(?:\.php|/|$)", re.IGNORECASE)
 
+_EMBEDDED_ABS_URL_RE = re.compile(r"https?://", re.IGNORECASE)
+
+
+def _unwrap_nested_url(url: str) -> str:
+    """Recover the real URL when a club site links the widget as a nested URL.
+
+    Some sites emit `https://club-site/https://club.intelligentgolf.co.uk/visitorbooking/`
+    (a leading-slash href that urljoin nests under the club's own origin). POSTing that
+    hits the club's own server — a 404 — not IntelligentGolf. If the *path* embeds another
+    absolute URL, take the embedded one. Restricted to the path so a legitimate redirect-
+    style query param (`?url=https://…`) is left alone.
+    """
+    parsed = urlparse(url)
+    matches = list(_EMBEDDED_ABS_URL_RE.finditer(parsed.path))
+    if matches:
+        return parsed.path[matches[-1].start():]
+    return url
+
 
 def _normalize_visitorbooking_url(url: str) -> str:
+    url = _unwrap_nested_url(url)
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise ScrapeError("URL must be http(s)")
